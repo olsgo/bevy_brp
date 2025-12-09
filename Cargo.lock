@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_brp_mcp"
-version = "0.17.2"
+version = "0.17.2-gb.1"
 dependencies = [
  "anyhow",
  "async-trait",
