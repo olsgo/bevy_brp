@@ -45,7 +45,7 @@ use crate::brp_tools::{
     RemoveResourcesResult, ReparentEntitiesParams, ReparentEntitiesResult, RpcDiscoverParams,
     RpcDiscoverResult, ScreenshotParams, ScreenshotResult, SendKeysParams, SendKeysResult,
     SetWindowTitleParams, SetWindowTitleResult, SpawnEntityParams, SpawnEntityResult,
-    StopWatchParams, TypeGuideParams, WorldGetComponentsWatch,
+    StopWatchParams, TypeGuideParams, WorldGetComponentsWatch, GrabSelection, GrabSelectionParams,
 };
 use crate::log_tools::DeleteLogs;
 use crate::log_tools::DeleteLogsParams;
@@ -217,6 +217,9 @@ pub enum ToolName {
     )]
     RegistrySchema,
 
+    /// `grab_selection` - Read latest grab/selection output for coding agents
+    GrabSelection,
+
     /// `world_reparent_entities` - Change entity parents
     #[brp_tool(
         brp_method = "world.reparent_entities",
@@ -381,6 +384,11 @@ impl ToolName {
             ),
             Self::RegistrySchema => Annotation::new(
                 "Get Type Schemas from Registry",
+                ToolCategory::Discovery,
+                EnvironmentImpact::ReadOnly,
+            ),
+            Self::GrabSelection => Annotation::new(
+                "read latest grab/selection output",
                 ToolCategory::Discovery,
                 EnvironmentImpact::ReadOnly,
             ),
@@ -562,6 +570,7 @@ impl ToolName {
             },
             Self::WorldQuery => Some(parameters::build_parameters_from::<QueryParams>),
             Self::RegistrySchema => Some(parameters::build_parameters_from::<RegistrySchemaParams>),
+            Self::GrabSelection => Some(parameters::build_parameters_from::<GrabSelectionParams>),
             Self::WorldRemoveComponents => {
                 Some(parameters::build_parameters_from::<RemoveComponentsParams>)
             },
@@ -633,6 +642,7 @@ impl ToolName {
             Self::WorldMutateResources => Arc::new(WorldMutateResources),
             Self::WorldQuery => Arc::new(WorldQuery),
             Self::RegistrySchema => Arc::new(RegistrySchema),
+            Self::GrabSelection => Arc::new(GrabSelection),
             Self::WorldRemoveComponents => Arc::new(WorldRemoveComponents),
             Self::WorldRemoveResources => Arc::new(WorldRemoveResources),
             Self::WorldReparentEntities => Arc::new(WorldReparentEntities),
