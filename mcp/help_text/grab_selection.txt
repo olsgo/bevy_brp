@@ -1,0 +1,3 @@
+Read the latest grab/selection JSON produced by the app (e.g., `ai-select`).
+Returns the enabled flag, entity info, hierarchy, cursor, and UI/World target details.
+Optional parameters let you override the file path, require enabled=true, or allow missing files.

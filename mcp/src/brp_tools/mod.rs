@@ -32,6 +32,8 @@ pub use tools::brp_extras_send_keys::SendKeysParams;
 pub use tools::brp_extras_send_keys::SendKeysResult;
 pub use tools::brp_extras_set_window_title::SetWindowTitleParams;
 pub use tools::brp_extras_set_window_title::SetWindowTitleResult;
+#[allow(unused_imports)]
+pub use tools::grab_selection::{GrabSelection, GrabSelectionParams, GrabSelectionResult};
 //
 // Export all parameter and result structs by name
 pub use tools::registry_schema::{RegistrySchemaParams, RegistrySchemaResult};
