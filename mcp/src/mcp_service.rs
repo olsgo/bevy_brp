@@ -3,11 +3,13 @@ use std::path::PathBuf;
 
 use itertools::Itertools;
 use rmcp::ErrorData as McpError;
+use rmcp::ServiceError;
 use rmcp::Peer;
 use rmcp::RoleServer;
 use rmcp::ServerHandler;
 use rmcp::model::CallToolRequestParam;
 use rmcp::model::CallToolResult;
+use rmcp::model::ErrorCode;
 use rmcp::model::ListToolsResult;
 use rmcp::model::PaginatedRequestParam;
 use rmcp::model::ServerCapabilities;
@@ -108,6 +110,19 @@ impl McpService {
                 Ok(paths)
             },
             Err(e) => {
+                // Some clients may not implement list_roots; fall back to current dir on -32601
+                let method_not_found = matches!(
+                    e,
+                    ServiceError::McpError(ref mcp_err)
+                        if mcp_err.code == ErrorCode::METHOD_NOT_FOUND
+                );
+
+                if method_not_found {
+                    tracing::warn!("Client does not support list_roots (method not found); falling back to current directory");
+                    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    return Ok(vec![cwd]);
+                }
+
                 tracing::error!("Failed to send roots/list request: {}", e);
                 Err(McpError::internal_error(
                     format!("Failed to list roots: {e}"),
