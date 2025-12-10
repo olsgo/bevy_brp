@@ -3,13 +3,6 @@
     "allow": [
       "Bash(/Applications/Zed.app/Contents/MacOS/cli:*)",
       "Bash(/dev/null)",
-      "Bash(/Users/natemccoy/.claude/scripts/bevy_migration_count_pattern.sh:*)",
-      "Bash(/Users/natemccoy/rust/bevy_brp/.claude/scripts/get_type_guide.sh:*)",
-      "Bash(/Users/natemccoy/rust/bevy_brp/.claude/scripts/mutation_test/operation_manager.py --action get-next)",
-      "Bash(/Users/natemccoy/rust/bevy_brp/.claude/scripts/mutation_test_subagent_log.sh: *)",
-      "Bash(/Users/natemccoy/rust/bevy_brp/.claude/scripts/type_guide_test_extract.sh /var/folders/rf/twhh0jfd243fpltn5k0w1t980000gn/T/mcp_response_brp_type_guide1758306170.json summary)",
-      "Bash(/Users/natemccoy/rust/bevy_brp/.claude/scripts/type_guide_test_extract.sh:*)",
-      "Bash(\"/Users/natemccoy/rust/bevy_brp\" rust)",
       "Bash(./.claude/commands/mutation_test.sh:*)",
       "Bash(./.claude/scripts/get_mutation_path.sh:*)",
       "Bash(./.claude/scripts/get_type_guide.sh:*)",
@@ -176,10 +169,7 @@
       "Bash(cat >:*)"
     ],
     "ask": [],
-    "additionalDirectories": [
-      "/Users/natemccoy/rust/bevy",
-      "/Users/natemccoy/rust"
-    ]
+    "additionalDirectories": []
   },
   "hooks": {
     "PreToolUse": [
