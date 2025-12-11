@@ -37,6 +37,7 @@ pub struct LaunchConfig<T> {
     pub path:           Option<String>,
     pub port:           Port,
     pub instance_count: InstanceCount,
+    pub features:       Option<Vec<String>>,
     _phantom:           PhantomData<T>,
 }
 
@@ -48,6 +49,7 @@ impl<T> LaunchConfig<T> {
         path: Option<String>,
         port: Port,
         instance_count: InstanceCount,
+        features: Option<Vec<String>>,
     ) -> Self {
         Self {
             target_name,
@@ -55,6 +57,7 @@ impl<T> LaunchConfig<T> {
             path,
             port,
             instance_count,
+            features,
             _phantom: PhantomData,
         }
     }
@@ -118,6 +121,7 @@ pub struct LaunchParams {
     pub path:           Option<String>,
     pub port:           Port,
     pub instance_count: InstanceCount,
+    pub features:       Option<Vec<String>>,
 }
 
 /// Generic launch handler that can work with any `LaunchConfig` type
@@ -206,6 +210,9 @@ pub trait LaunchConfigTrait: Clone {
     /// Get the instance count for launching multiple instances
     fn instance_count(&self) -> InstanceCount;
 
+    /// Get the features to enable
+    fn features(&self) -> Option<&Vec<String>>;
+
     /// Set the port (needed for multi-instance launches)
     fn set_port(&mut self, port: Port);
 
@@ -224,6 +231,7 @@ pub trait LaunchConfigTrait: Clone {
             Self::TARGET_TYPE,
             self.profile(),
             manifest_dir,
+            self.features(),
         )
     }
 }
@@ -287,9 +295,18 @@ pub fn build_cargo_example_command(
     example_name: &str,
     profile: &str,
     port: Option<Port>,
+    features: Option<&Vec<String>>,
 ) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.arg("run").arg("--example").arg(example_name);
+
+    // Add features flag if provided
+    if let Some(features_list) = features {
+        if !features_list.is_empty() {
+            let features_str = features_list.join(",");
+            cmd.arg("--features").arg(features_str);
+        }
+    }
 
     // Add profile flag if release
     if profile == "release" {
@@ -325,6 +342,7 @@ fn build_cargo_command(
     target_type: TargetType,
     profile: &str,
     manifest_dir: &Path,
+    features: Option<&Vec<String>>,
 ) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(manifest_dir);
@@ -332,6 +350,14 @@ fn build_cargo_command(
 
     // Add target-specific arguments
     target_type.add_cargo_args(&mut cmd, target_name);
+
+    // Add features flag if provided
+    if let Some(features_list) = features {
+        if !features_list.is_empty() {
+            let features_str = features_list.join(",");
+            cmd.arg("--features").arg(features_str);
+        }
+    }
 
     // Add profile flag if release
     if profile == "release" {
@@ -433,8 +459,9 @@ pub fn run_cargo_build(
     target_type: TargetType,
     profile: &str,
     manifest_dir: &Path,
+    features: Option<&Vec<String>>,
 ) -> Result<BuildState> {
-    let mut cmd = build_cargo_command(target_name, target_type, profile, manifest_dir);
+    let mut cmd = build_cargo_command(target_name, target_type, profile, manifest_dir, features);
     let output = execute_build_command(&mut cmd, target_name, target_type, profile, manifest_dir)?;
     let build_state = parse_build_output(&output.stdout, target_name);
     log_build_result(build_state, target_name, target_type);
@@ -793,6 +820,7 @@ impl FromLaunchParams for LaunchConfig<App> {
             params.path.clone(),
             params.port,
             params.instance_count,
+            params.features.clone(),
         )
     }
 }
@@ -809,6 +837,8 @@ impl LaunchConfigTrait for LaunchConfig<App> {
     fn port(&self) -> Port { self.port }
 
     fn instance_count(&self) -> InstanceCount { self.instance_count }
+
+    fn features(&self) -> Option<&Vec<String>> { self.features.as_ref() }
 
     fn set_port(&mut self, port: Port) { self.port = port; }
 
@@ -827,6 +857,7 @@ impl FromLaunchParams for LaunchConfig<Example> {
             params.path.clone(),
             params.port,
             params.instance_count,
+            params.features.clone(),
         )
     }
 }
@@ -844,10 +875,12 @@ impl LaunchConfigTrait for LaunchConfig<Example> {
 
     fn instance_count(&self) -> InstanceCount { self.instance_count }
 
+    fn features(&self) -> Option<&Vec<String>> { self.features.as_ref() }
+
     fn set_port(&mut self, port: Port) { self.port = port; }
 
     fn build_command(&self, _target: &BevyTarget) -> Command {
-        build_cargo_example_command(&self.target_name, self.profile(), Some(self.port))
+        build_cargo_example_command(&self.target_name, self.profile(), Some(self.port), self.features.as_ref())
     }
 
     fn extra_log_info(&self, target: &BevyTarget) -> Option<String> {

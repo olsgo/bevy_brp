@@ -1,6 +1,6 @@
 Launches Bevy apps
 
-Features: Non-blocking execution, temp directory logs, debug/release profiles, multi-instance support.
+Features: Non-blocking execution, temp directory logs, debug/release profiles, multi-instance support, optional Cargo features.
 
 Multi-instance launching:
 - When instance_count > 1, launches multiple instances on sequential ports starting from the specified port.
@@ -10,3 +10,4 @@ Notes:
 - If multiple apps with the same name exist in different paths, you must specify the path parameter.
 - Path matching supports: full relative paths (e.g., "bevy_brp/my-app"), partial paths (e.g., "my-app"), or workspace names for disambiguation.
 - When specifying a port, bevy_brp_extras is required to support listening on the environment variable `BRP_EXTRAS_PORT`.
+- Use the `features` parameter to enable Cargo features when building (e.g., `["game"]` or `["game", "audio"]`).

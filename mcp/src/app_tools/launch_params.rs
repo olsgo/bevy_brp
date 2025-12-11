@@ -25,6 +25,10 @@ pub struct LaunchBevyBinaryParams {
     /// Number of instances to launch (default: 1)
     #[serde(default)]
     pub instance_count: InstanceCount,
+    /// Cargo features to enable when building and running
+    #[serde(default)]
+    #[to_metadata(skip_if_none)]
+    pub features:       Option<Vec<String>>,
 }
 
 impl ToLaunchParams for LaunchBevyBinaryParams {
@@ -38,6 +42,7 @@ impl ToLaunchParams for LaunchBevyBinaryParams {
             path:           self.path.clone(),
             port:           self.port,
             instance_count: self.instance_count,
+            features:       self.features.clone(),
         }
     }
 }
