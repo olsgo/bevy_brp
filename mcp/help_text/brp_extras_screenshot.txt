@@ -1,8 +1,16 @@
 Capture screenshots from running Bevy applications using bevy_brp_extras.
 
+Parameters:
+- path (required): File path to save the screenshot
+- delay_frames (optional): Frames to wait before capture (default: 2)
+  Use this to avoid white/blank screenshots by ensuring the scene has rendered.
+  Set to 0 for immediate capture (may result in blank screenshots on early frames).
+
 Behavior:
-- Captures current frame via bevy_brp_extras/screenshot
-- Saves to specified path
+- Waits specified frames to ensure scene is fully rendered
+- Captures frame via bevy_brp_extras/screenshot
+- Converts to RGB8 (strips alpha for correct HDR handling)
+- Saves to specified path asynchronously
 
 Prerequisites:
 - bevy_brp_extras dependency required

@@ -109,6 +109,9 @@ impl Plugin for BrpExtrasPlugin {
         // Add the system to handle deferred shutdown
         app.add_systems(Update, shutdown::deferred_shutdown_system);
 
+        // Add the system to process pending screenshots (for frame delay feature)
+        app.add_systems(Update, screenshot::process_pending_screenshots);
+
         app.add_systems(Startup, move |_world: &mut World| {
             log_initialization(effective_port, &source_description);
         });
