@@ -266,6 +266,9 @@ impl ParameterBuilder {
             ]
             .into(),
         );
+        // When type includes "array", JSON Schema requires an items field
+        // Using empty object {} means array items can be any type
+        prop.insert("items".to_string(), Value::Object(Map::new()));
         prop.insert_field("description", description);
         self.properties.insert_field(name, prop);
 
