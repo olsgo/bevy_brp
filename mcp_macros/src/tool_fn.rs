@@ -15,6 +15,8 @@ use syn::parse2;
 /// # Usage
 ///
 /// ```rust
+/// use bevy_brp_mcp_macros::ToolFn;
+///
 /// #[derive(ToolFn)]
 /// #[tool_fn(params = "MyParams", output = "MyOutput")]
 /// pub struct MyTool;
@@ -22,6 +24,8 @@ use syn::parse2;
 ///
 /// Or with context passing:
 /// ```rust
+/// use bevy_brp_mcp_macros::ToolFn;
+///
 /// #[derive(ToolFn)]
 /// #[tool_fn(params = "MyParams", output = "MyOutput", with_context)]
 /// pub struct MyTool;
