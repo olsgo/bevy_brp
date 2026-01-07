@@ -59,10 +59,14 @@ impl HandlerContext {
         let args_value = if std::any::type_name::<T>() == "()" {
             serde_json::Value::Null
         } else {
-            self.request.arguments.as_ref().map_or_else(
+            let raw_args = self.request.arguments.as_ref().map_or_else(
                 || serde_json::Value::Object(serde_json::Map::new()),
                 |args| serde_json::Value::Object(args.clone()),
-            )
+            );
+            // Coerce string values that look like numbers/booleans to proper JSON types.
+            // This handles MCP clients that serialize numeric values as strings
+            // (e.g., "5" instead of 5), which would otherwise cause deserialization errors.
+            crate::json_object::coerce_string_values(raw_args)
         };
 
         serde_json::from_value(args_value).map_err(|e| {

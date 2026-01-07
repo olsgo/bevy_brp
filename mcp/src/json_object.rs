@@ -111,6 +111,57 @@ impl JsonObjectAccess for Map<String, Value> {
     }
 }
 
+/// Coerce string values that look like numbers or booleans into their proper JSON types.
+///
+/// This is needed because MCP clients may serialize numeric values as strings
+/// (e.g., `"5"` instead of `5`), which causes deserialization errors when
+/// the target expects a numeric type like `f32`.
+///
+/// This function recursively processes:
+/// - Strings that parse as integers → `Value::Number`
+/// - Strings that parse as floats → `Value::Number`
+/// - Strings "true"/"false" → `Value::Bool`
+/// - Arrays → recursively process each element
+/// - Objects → recursively process each value
+///
+/// # Example
+/// ```
+/// use serde_json::json;
+/// let input = json!({"value": "5", "nested": {"x": "3.14", "flag": "true"}});
+/// let output = coerce_string_values(input);
+/// // output = {"value": 5, "nested": {"x": 3.14, "flag": true}}
+/// ```
+pub fn coerce_string_values(value: Value) -> Value {
+    match value {
+        Value::String(s) => {
+            // Try to parse as integer first (more specific)
+            if let Ok(n) = s.parse::<i64>() {
+                return Value::Number(n.into());
+            }
+            // Try to parse as float
+            if let Ok(f) = s.parse::<f64>() {
+                if let Some(n) = serde_json::Number::from_f64(f) {
+                    return Value::Number(n);
+                }
+            }
+            // Try to parse as boolean
+            match s.as_str() {
+                "true" => return Value::Bool(true),
+                "false" => return Value::Bool(false),
+                _ => {},
+            }
+            // Keep as string if no conversion applies
+            Value::String(s)
+        },
+        Value::Array(arr) => Value::Array(arr.into_iter().map(coerce_string_values).collect()),
+        Value::Object(obj) => {
+            Value::Object(obj.into_iter().map(|(k, v)| (k, coerce_string_values(v))).collect())
+        },
+        // Pass through other types unchanged
+        other => other,
+    }
+}
+
 /// Extension trait for converting iterators to `Vec<String>`
 ///
 /// This trait provides a convenient way to collect iterators of string-convertible
