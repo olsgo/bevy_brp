@@ -23,9 +23,8 @@ use super::annotations::ToolCategory;
 use super::parameters;
 use super::types::ErasedToolFn;
 use crate::app_tools::LaunchBevyBinaryParams;
-use crate::app_tools::ListBevyApps;
-use crate::app_tools::ListBevyExamples;
-use crate::app_tools::ListBrpApps;
+use crate::app_tools::ListBevy;
+use crate::app_tools::ListBevyParams;
 use crate::app_tools::Shutdown;
 use crate::app_tools::ShutdownParams;
 use crate::app_tools::Status;
@@ -35,17 +34,23 @@ use crate::app_tools::{self};
 // Import parameter and result types so they're in scope for the macro
 use crate::brp_tools::{
     AllTypeGuidesParams, BevyListWatch, BrpAllTypeGuides, BrpExecute, BrpListActiveWatches,
-    BrpStopWatch, BrpTypeGuide, DespawnEntityParams, DespawnEntityResult, ExecuteParams,
-    GetComponentsParams, GetComponentsResult, GetComponentsWatchParams, GetResourcesParams,
-    GetResourcesResult, InsertComponentsParams, InsertComponentsResult, InsertResourcesParams,
-    InsertResourcesResult, ListComponentsParams, ListComponentsResult, ListComponentsWatchParams,
-    ListResourcesParams, ListResourcesResult, MutateComponentsParams, MutateComponentsResult,
-    MutateResourcesParams, MutateResourcesResult, QueryParams, QueryResult, RegistrySchemaParams,
-    RegistrySchemaResult, RemoveComponentsParams, RemoveComponentsResult, RemoveResourcesParams,
-    RemoveResourcesResult, ReparentEntitiesParams, ReparentEntitiesResult, RpcDiscoverParams,
-    RpcDiscoverResult, ScreenshotParams, ScreenshotResult, SendKeysParams, SendKeysResult,
-    SetWindowTitleParams, SetWindowTitleResult, SpawnEntityParams, SpawnEntityResult,
-    StopWatchParams, TypeGuideParams, WorldGetComponentsWatch, GrabSelection, GrabSelectionParams,
+    BrpStopWatch, BrpTypeGuide, ClickMouseParams, ClickMouseResult, DespawnEntityParams,
+    DespawnEntityResult, DoubleClickMouseParams, DoubleClickMouseResult, DoubleTapGestureParams,
+    DoubleTapGestureResult, DragMouseParams, DragMouseResult, ExecuteParams, GetComponentsParams,
+    GetComponentsResult, GetComponentsWatchParams, GetDiagnosticsParams, GetDiagnosticsResult,
+    GetResourcesParams, GetResourcesResult, GrabSelection, GrabSelectionParams,
+    InsertComponentsParams, InsertComponentsResult, InsertResourcesParams, InsertResourcesResult,
+    ListComponentsParams, ListComponentsResult, ListComponentsWatchParams, ListResourcesParams,
+    ListResourcesResult, MoveMouseParams, MoveMouseResult, MutateComponentsParams,
+    MutateComponentsResult, MutateResourcesParams, MutateResourcesResult, PinchGestureParams,
+    PinchGestureResult, QueryParams, QueryResult, RegistrySchemaParams, RegistrySchemaResult,
+    RemoveComponentsParams, RemoveComponentsResult, RemoveResourcesParams, RemoveResourcesResult,
+    ReparentEntitiesParams, ReparentEntitiesResult, RotationGestureParams, RotationGestureResult,
+    RpcDiscoverParams, RpcDiscoverResult, ScreenshotParams, ScreenshotResult, ScrollMouseParams,
+    ScrollMouseResult, SendKeysParams, SendKeysResult, SendMouseButtonParams,
+    SendMouseButtonResult, SetWindowTitleParams, SetWindowTitleResult, SpawnEntityParams,
+    SpawnEntityResult, StopWatchParams, TriggerEventParams, TriggerEventResult, TypeGuideParams,
+    TypeTextParams, TypeTextResult, WorldGetComponentsWatch,
 };
 use crate::log_tools::DeleteLogs;
 use crate::log_tools::DeleteLogsParams;
@@ -63,7 +68,7 @@ use crate::log_tools::SetTracingLevelParams;
 /// Call information for tracking tool execution
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
-pub enum CallInfo {
+pub(super) enum CallInfo {
     /// Local tool execution (no BRP involved)
     Local {
         /// The MCP tool name (e.g., `brp_status`)
@@ -72,23 +77,10 @@ pub enum CallInfo {
     /// BRP tool execution (calls Bevy Remote Protocol)
     Brp {
         /// The MCP tool name (e.g., `world_spawn_entity`)
-        mcp_tool:   String,
+        mcp_tool: String,
         /// The BRP method name (e.g., `world.spawn_entity`)
         brp_method: String,
     },
-}
-
-impl CallInfo {
-    /// Create `CallInfo` for a local tool
-    pub const fn local(mcp_tool: String) -> Self { Self::Local { mcp_tool } }
-
-    /// Create `CallInfo` for a BRP tool
-    pub const fn brp(mcp_tool: String, brp_method: String) -> Self {
-        Self::Brp {
-            mcp_tool,
-            brp_method,
-        }
-    }
 }
 
 /// Tool names enum with automatic `snake_case` serialization
@@ -209,6 +201,13 @@ pub enum ToolName {
         result = "SpawnEntityResult"
     )]
     WorldSpawnEntity,
+    /// `world_trigger_event` - Trigger events in the Bevy world
+    #[brp_tool(
+        brp_method = "world.trigger_event",
+        params = "TriggerEventParams",
+        result = "TriggerEventResult"
+    )]
+    WorldTriggerEvent,
     /// `registry_schema` - Get type schemas
     #[brp_tool(
         brp_method = "registry.schema",
@@ -216,9 +215,6 @@ pub enum ToolName {
         result = "RegistrySchemaResult"
     )]
     RegistrySchema,
-
-    /// `grab_selection` - Read latest grab/selection output for coding agents
-    GrabSelection,
 
     /// `world_reparent_entities` - Change entity parents
     #[brp_tool(
@@ -253,6 +249,13 @@ pub enum ToolName {
         result = "SendKeysResult"
     )]
     BrpExtrasSendKeys,
+    /// `brp_extras_type_text` - Type text sequentially (one char per frame)
+    #[brp_tool(
+        brp_method = "brp_extras/type_text",
+        params = "TypeTextParams",
+        result = "TypeTextResult"
+    )]
+    BrpExtrasTypeText,
     /// `brp_extras_set_window_title` - Change window title
     #[brp_tool(
         brp_method = "brp_extras/set_window_title",
@@ -260,24 +263,90 @@ pub enum ToolName {
         result = "SetWindowTitleResult"
     )]
     BrpExtrasSetWindowTitle,
+    /// `brp_extras_move_mouse` - Move mouse cursor
+    #[brp_tool(
+        brp_method = "brp_extras/move_mouse",
+        params = "MoveMouseParams",
+        result = "MoveMouseResult"
+    )]
+    BrpExtrasMoveMouse,
+    /// `brp_extras_send_mouse_button` - Send mouse button input
+    #[brp_tool(
+        brp_method = "brp_extras/send_mouse_button",
+        params = "SendMouseButtonParams",
+        result = "SendMouseButtonResult"
+    )]
+    BrpExtrasSendMouseButton,
+    /// `brp_extras_click_mouse` - Click mouse button
+    #[brp_tool(
+        brp_method = "brp_extras/click_mouse",
+        params = "ClickMouseParams",
+        result = "ClickMouseResult"
+    )]
+    BrpExtrasClickMouse,
+    /// `brp_extras_double_click_mouse` - Perform double click
+    #[brp_tool(
+        brp_method = "brp_extras/double_click_mouse",
+        params = "DoubleClickMouseParams",
+        result = "DoubleClickMouseResult"
+    )]
+    BrpExtrasDoubleClickMouse,
+    /// `brp_extras_drag_mouse` - Drag mouse from start to end position
+    #[brp_tool(
+        brp_method = "brp_extras/drag_mouse",
+        params = "DragMouseParams",
+        result = "DragMouseResult"
+    )]
+    BrpExtrasDragMouse,
+    /// `brp_extras_scroll_mouse` - Send mouse wheel scroll events
+    #[brp_tool(
+        brp_method = "brp_extras/scroll_mouse",
+        params = "ScrollMouseParams",
+        result = "ScrollMouseResult"
+    )]
+    BrpExtrasScrollMouse,
+    /// `brp_extras_pinch_gesture` - Send pinch gesture events
+    #[brp_tool(
+        brp_method = "brp_extras/pinch_gesture",
+        params = "PinchGestureParams",
+        result = "PinchGestureResult"
+    )]
+    BrpExtrasPinchGesture,
+    /// `brp_extras_rotation_gesture` - Send rotation gesture events
+    #[brp_tool(
+        brp_method = "brp_extras/rotation_gesture",
+        params = "RotationGestureParams",
+        result = "RotationGestureResult"
+    )]
+    BrpExtrasRotationGesture,
+    /// `brp_extras_double_tap_gesture` - Send double tap gesture events
+    #[brp_tool(
+        brp_method = "brp_extras/double_tap_gesture",
+        params = "DoubleTapGestureParams",
+        result = "DoubleTapGestureResult"
+    )]
+    BrpExtrasDoubleTapGesture,
+    /// `brp_extras_get_diagnostics` - Get FPS diagnostics
+    #[brp_tool(
+        brp_method = "brp_extras/get_diagnostics",
+        params = "GetDiagnosticsParams",
+        result = "GetDiagnosticsResult"
+    )]
+    BrpExtrasGetDiagnostics,
 
     // BRP Watch Assist Tools
     /// `brp_stop_watch` - Stop active watch subscriptions
     BrpStopWatch,
     /// `brp_list_active_watches` - List active watch subscriptions
     BrpListActiveWatches,
+    /// `grab_selection` - Read latest grab/selection output for coding agents
+    GrabSelection,
 
     // Application Management Tools
-    /// `brp_list_bevy_apps` - List Bevy apps in workspace
-    BrpListBevyApps,
-    /// `brp_list_bevy_examples` - List Bevy examples in workspace
-    BrpListBevyExamples,
-    /// `brp_list_brp_apps` - List BRP-enabled Bevy apps
-    BrpListBrpApps,
-    /// `brp_launch_bevy_app` - Launch Bevy applications
-    BrpLaunchBevyApp,
-    /// `brp_launch_bevy_example` - Launch Bevy examples
-    BrpLaunchBevyExample,
+    /// `brp_list_bevy` - List all Bevy apps and examples in workspace
+    BrpListBevy,
+    /// `brp_launch` - Launch Bevy apps or examples
+    BrpLaunch,
     /// `brp_shutdown` - Shutdown running Bevy applications
     #[brp_tool(brp_method = "brp_extras/shutdown")]
     BrpShutdown,
@@ -311,11 +380,11 @@ impl ToolName {
     /// This method creates the appropriate `CallInfo` variant based on the tool type:
     /// - BRP tools get `CallInfo::Brp`
     /// - Non-BRP tools get `CallInfo::Local`
-    pub fn get_call_info(self) -> CallInfo {
+    pub(super) fn get_call_info(self) -> CallInfo {
         let tool_name = self.to_string();
         match self.to_brp_method() {
             Some(brp_method) => CallInfo::Brp {
-                mcp_tool:   tool_name,
+                mcp_tool: tool_name,
                 brp_method: brp_method.as_str().to_string(),
             },
             None => CallInfo::Local {
@@ -330,202 +399,247 @@ impl ToolName {
     ///
     /// so many ways to construct the annotations. this is one of those ways.
     #[allow(clippy::too_many_lines)]
-    pub fn get_annotations(self) -> Annotation {
+    fn get_annotations(self) -> Annotation {
         match self {
             Self::WorldDespawnEntity => Annotation::new(
-                "Despawn Bevy Entity",
+                "despawn bevy entity",
                 ToolCategory::Entity,
                 EnvironmentImpact::DestructiveIdempotent,
             ),
             Self::WorldGetComponents => Annotation::new(
-                "Get Component Data",
+                "get component data",
                 ToolCategory::Component,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::WorldGetResources => Annotation::new(
-                "Get Resource Data",
+                "get resource data",
                 ToolCategory::Resource,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::WorldInsertComponents => Annotation::new(
-                "Insert Components",
+                "insert components",
                 ToolCategory::Component,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::WorldInsertResources => Annotation::new(
-                "Insert Resources",
+                "insert resources",
                 ToolCategory::Resource,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::WorldListComponents => Annotation::new(
-                "List Components",
+                "list components",
                 ToolCategory::Component,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::WorldListResources => Annotation::new(
-                "List Resources",
+                "list resources",
                 ToolCategory::Resource,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::WorldMutateComponents => Annotation::new(
-                "Mutate Components",
+                "mutate components",
                 ToolCategory::Component,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::WorldMutateResources => Annotation::new(
-                "Mutate Resources",
+                "mutate resources",
                 ToolCategory::Resource,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::WorldQuery => Annotation::new(
-                "Query Entities/Components",
+                "query entities/components",
                 ToolCategory::Component,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::RegistrySchema => Annotation::new(
-                "Get Type Schemas from Registry",
-                ToolCategory::Discovery,
-                EnvironmentImpact::ReadOnly,
-            ),
-            Self::GrabSelection => Annotation::new(
-                "read latest grab/selection output",
+                "get type schemas using 'registry.schema' method",
                 ToolCategory::Discovery,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::WorldRemoveComponents => Annotation::new(
-                "Remove Components",
+                "remove components",
                 ToolCategory::Component,
                 EnvironmentImpact::DestructiveIdempotent,
             ),
             Self::WorldRemoveResources => Annotation::new(
-                "Remove Resources",
+                "remove resources",
                 ToolCategory::Resource,
                 EnvironmentImpact::DestructiveIdempotent,
             ),
             Self::WorldReparentEntities => Annotation::new(
-                "Reparent Entities",
+                "reparent entities",
                 ToolCategory::Entity,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::RpcDiscover => Annotation::new(
-                "Discover BRP Methods",
+                "discover brp methods",
                 ToolCategory::Discovery,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::WorldSpawnEntity => Annotation::new(
-                "Spawn Entity",
+                "spawn entity",
                 ToolCategory::Entity,
                 EnvironmentImpact::AdditiveNonIdempotent,
             ),
+            Self::WorldTriggerEvent => Annotation::new(
+                "trigger event",
+                ToolCategory::Event,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
             Self::BrpExecute => Annotation::new(
-                "Execute BRP Method",
+                "execute brp method",
                 ToolCategory::DynamicBrp,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::BrpExtrasScreenshot => Annotation::new(
-                "Take Screenshot",
+                "take screenshot",
                 ToolCategory::Extras,
                 EnvironmentImpact::AdditiveNonIdempotent,
             ),
             Self::BrpExtrasSendKeys => Annotation::new(
-                "Send Keys",
+                "send keys",
                 ToolCategory::Extras,
                 EnvironmentImpact::AdditiveNonIdempotent,
             ),
             Self::BrpExtrasSetWindowTitle => Annotation::new(
-                "Change Window Title",
+                "change window title",
                 ToolCategory::Extras,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
+            Self::BrpExtrasTypeText => Annotation::new(
+                "type text sequentially",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasMoveMouse => Annotation::new(
+                "move mouse cursor",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasSendMouseButton => Annotation::new(
+                "send mouse button",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasClickMouse => Annotation::new(
+                "click mouse button",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasDoubleClickMouse => Annotation::new(
+                "double click mouse",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasDragMouse => Annotation::new(
+                "drag mouse",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasScrollMouse => Annotation::new(
+                "scroll mouse wheel",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasPinchGesture => Annotation::new(
+                "pinch gesture",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasRotationGesture => Annotation::new(
+                "rotation gesture",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasDoubleTapGesture => Annotation::new(
+                "double tap gesture",
+                ToolCategory::Extras,
+                EnvironmentImpact::AdditiveNonIdempotent,
+            ),
+            Self::BrpExtrasGetDiagnostics => Annotation::new(
+                "get FPS diagnostics",
+                ToolCategory::Extras,
+                EnvironmentImpact::ReadOnly,
+            ),
             Self::WorldGetComponentsWatch => Annotation::new(
-                "Watch Component Changes",
+                "watch component changes",
                 ToolCategory::WatchMonitoring,
                 EnvironmentImpact::AdditiveNonIdempotent,
             ),
             Self::WorldListComponentsWatch => Annotation::new(
-                "Watch Component List",
+                "watch component list",
                 ToolCategory::WatchMonitoring,
                 EnvironmentImpact::AdditiveNonIdempotent,
             ),
             Self::BrpDeleteLogs => Annotation::new(
-                "Delete Log Files",
+                "delete log files",
                 ToolCategory::Logging,
                 EnvironmentImpact::DestructiveIdempotent,
             ),
             #[cfg(feature = "mcp-debug")]
             Self::BrpGetTraceLogPath => Annotation::new(
-                "Get Trace Log Path",
+                "get trace log path",
                 ToolCategory::Logging,
                 EnvironmentImpact::ReadOnly,
             ),
-            Self::BrpLaunchBevyApp => Annotation::new(
-                "Launch Bevy App",
+            Self::BrpLaunch => Annotation::new(
+                "launch bevy app or example",
                 ToolCategory::App,
                 EnvironmentImpact::AdditiveNonIdempotent,
             ),
-            Self::BrpLaunchBevyExample => Annotation::new(
-                "Launch Bevy Example",
-                ToolCategory::App,
-                EnvironmentImpact::AdditiveNonIdempotent,
-            ),
-            Self::BrpListBevyApps => Annotation::new(
-                "List Bevy Apps",
-                ToolCategory::App,
-                EnvironmentImpact::ReadOnly,
-            ),
-            Self::BrpListBevyExamples => Annotation::new(
-                "List Bevy Examples",
-                ToolCategory::App,
-                EnvironmentImpact::ReadOnly,
-            ),
-            Self::BrpListBrpApps => Annotation::new(
-                "List Bevy BRP-enabled Apps",
+            Self::BrpListBevy => Annotation::new(
+                "list bevy apps and examples",
                 ToolCategory::App,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::BrpListActiveWatches => Annotation::new(
-                "List Active Watches",
+                "list active watches",
                 ToolCategory::WatchMonitoring,
                 EnvironmentImpact::ReadOnly,
             ),
+            Self::GrabSelection => Annotation::new(
+                "read latest grab selection output",
+                ToolCategory::Discovery,
+                EnvironmentImpact::ReadOnly,
+            ),
             Self::BrpStopWatch => Annotation::new(
-                "Stop Watch",
+                "stop watch",
                 ToolCategory::WatchMonitoring,
                 EnvironmentImpact::DestructiveIdempotent,
             ),
             Self::BrpListLogs => Annotation::new(
-                "List Log Files",
+                "list log files",
                 ToolCategory::Logging,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::BrpReadLog => Annotation::new(
-                "Read Log File",
+                "read log file",
                 ToolCategory::Logging,
                 EnvironmentImpact::ReadOnly,
             ),
             #[cfg(feature = "mcp-debug")]
             Self::BrpSetTracingLevel => Annotation::new(
-                "Set Tracing Level",
+                "set tracing level",
                 ToolCategory::Logging,
                 EnvironmentImpact::AdditiveIdempotent,
             ),
             Self::BrpStatus => Annotation::new(
-                "Check App Status",
+                "check app status",
                 ToolCategory::App,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::BrpShutdown => Annotation::new(
-                "Shutdown Bevy App",
+                "shutdown bevy app",
                 ToolCategory::App,
                 EnvironmentImpact::DestructiveIdempotent,
             ),
             Self::BrpTypeGuide => Annotation::new(
-                "Type guide for components and resources",
+                "type guide for components and resources",
                 ToolCategory::Discovery,
                 EnvironmentImpact::ReadOnly,
             ),
             Self::BrpAllTypeGuides => Annotation::new(
-                "Get type guides for all registered types",
+                "get type guides for all registered types",
                 ToolCategory::Discovery,
                 EnvironmentImpact::ReadOnly,
             ),
@@ -539,7 +653,7 @@ impl ToolName {
     /// its possible it could have created a shell and we implement the rest manually
     /// but there's already enough indirection going on and so this is fine.
     #[allow(clippy::too_many_lines)]
-    pub fn get_parameters(self) -> Option<fn() -> parameters::ParameterBuilder> {
+    fn get_parameters(self) -> Option<fn() -> parameters::ParameterBuilder> {
         match self {
             Self::WorldDespawnEntity => {
                 Some(parameters::build_parameters_from::<DespawnEntityParams>)
@@ -570,7 +684,6 @@ impl ToolName {
             },
             Self::WorldQuery => Some(parameters::build_parameters_from::<QueryParams>),
             Self::RegistrySchema => Some(parameters::build_parameters_from::<RegistrySchemaParams>),
-            Self::GrabSelection => Some(parameters::build_parameters_from::<GrabSelectionParams>),
             Self::WorldRemoveComponents => {
                 Some(parameters::build_parameters_from::<RemoveComponentsParams>)
             },
@@ -582,13 +695,43 @@ impl ToolName {
             },
             Self::RpcDiscover => Some(parameters::build_parameters_from::<RpcDiscoverParams>),
             Self::WorldSpawnEntity => Some(parameters::build_parameters_from::<SpawnEntityParams>),
+            Self::WorldTriggerEvent => {
+                Some(parameters::build_parameters_from::<TriggerEventParams>)
+            },
             Self::BrpExecute => Some(parameters::build_parameters_from::<ExecuteParams>),
             Self::BrpExtrasScreenshot => {
                 Some(parameters::build_parameters_from::<ScreenshotParams>)
             },
             Self::BrpExtrasSendKeys => Some(parameters::build_parameters_from::<SendKeysParams>),
+            Self::BrpExtrasTypeText => Some(parameters::build_parameters_from::<TypeTextParams>),
             Self::BrpExtrasSetWindowTitle => {
                 Some(parameters::build_parameters_from::<SetWindowTitleParams>)
+            },
+            Self::BrpExtrasMoveMouse => Some(parameters::build_parameters_from::<MoveMouseParams>),
+            Self::BrpExtrasSendMouseButton => {
+                Some(parameters::build_parameters_from::<SendMouseButtonParams>)
+            },
+            Self::BrpExtrasClickMouse => {
+                Some(parameters::build_parameters_from::<ClickMouseParams>)
+            },
+            Self::BrpExtrasDoubleClickMouse => {
+                Some(parameters::build_parameters_from::<DoubleClickMouseParams>)
+            },
+            Self::BrpExtrasDragMouse => Some(parameters::build_parameters_from::<DragMouseParams>),
+            Self::BrpExtrasScrollMouse => {
+                Some(parameters::build_parameters_from::<ScrollMouseParams>)
+            },
+            Self::BrpExtrasPinchGesture => {
+                Some(parameters::build_parameters_from::<PinchGestureParams>)
+            },
+            Self::BrpExtrasRotationGesture => {
+                Some(parameters::build_parameters_from::<RotationGestureParams>)
+            },
+            Self::BrpExtrasDoubleTapGesture => {
+                Some(parameters::build_parameters_from::<DoubleTapGestureParams>)
+            },
+            Self::BrpExtrasGetDiagnostics => {
+                Some(parameters::build_parameters_from::<GetDiagnosticsParams>)
             },
             Self::WorldGetComponentsWatch => {
                 Some(parameters::build_parameters_from::<GetComponentsWatchParams>)
@@ -601,15 +744,12 @@ impl ToolName {
             // this lot has no parametrers
             #[cfg(feature = "mcp-debug")]
             Self::BrpGetTraceLogPath => None,
-            Self::BrpListBevyApps
-            | Self::BrpListBevyExamples
-            | Self::BrpListBrpApps
-            | Self::BrpListActiveWatches => None,
+            Self::BrpListActiveWatches => None,
+            Self::GrabSelection => Some(parameters::build_parameters_from::<GrabSelectionParams>),
+            Self::BrpListBevy => Some(parameters::build_parameters_from::<ListBevyParams>),
 
             // and thest of these app and watch tools do have parameters
-            Self::BrpLaunchBevyApp | Self::BrpLaunchBevyExample => {
-                Some(parameters::build_parameters_from::<LaunchBevyBinaryParams>)
-            },
+            Self::BrpLaunch => Some(parameters::build_parameters_from::<LaunchBevyBinaryParams>),
             Self::BrpStopWatch => Some(parameters::build_parameters_from::<StopWatchParams>),
             Self::BrpListLogs => Some(parameters::build_parameters_from::<ListLogsParams>),
             Self::BrpReadLog => Some(parameters::build_parameters_from::<ReadLogParams>),
@@ -628,7 +768,7 @@ impl ToolName {
 
     /// Create handler for this tool
     #[allow(clippy::too_many_lines)]
-    pub fn create_handler(self) -> Arc<dyn ErasedToolFn> {
+    fn create_handler(self) -> Arc<dyn ErasedToolFn> {
         match self {
             // BRP tools generated by the macro
             Self::WorldDespawnEntity => Arc::new(WorldDespawnEntity),
@@ -642,15 +782,26 @@ impl ToolName {
             Self::WorldMutateResources => Arc::new(WorldMutateResources),
             Self::WorldQuery => Arc::new(WorldQuery),
             Self::RegistrySchema => Arc::new(RegistrySchema),
-            Self::GrabSelection => Arc::new(GrabSelection),
             Self::WorldRemoveComponents => Arc::new(WorldRemoveComponents),
             Self::WorldRemoveResources => Arc::new(WorldRemoveResources),
             Self::WorldReparentEntities => Arc::new(WorldReparentEntities),
             Self::RpcDiscover => Arc::new(RpcDiscover),
             Self::WorldSpawnEntity => Arc::new(WorldSpawnEntity),
+            Self::WorldTriggerEvent => Arc::new(WorldTriggerEvent),
             Self::BrpExtrasScreenshot => Arc::new(BrpExtrasScreenshot),
             Self::BrpExtrasSendKeys => Arc::new(BrpExtrasSendKeys),
+            Self::BrpExtrasTypeText => Arc::new(BrpExtrasTypeText),
             Self::BrpExtrasSetWindowTitle => Arc::new(BrpExtrasSetWindowTitle),
+            Self::BrpExtrasMoveMouse => Arc::new(BrpExtrasMoveMouse),
+            Self::BrpExtrasSendMouseButton => Arc::new(BrpExtrasSendMouseButton),
+            Self::BrpExtrasClickMouse => Arc::new(BrpExtrasClickMouse),
+            Self::BrpExtrasDoubleClickMouse => Arc::new(BrpExtrasDoubleClickMouse),
+            Self::BrpExtrasDragMouse => Arc::new(BrpExtrasDragMouse),
+            Self::BrpExtrasScrollMouse => Arc::new(BrpExtrasScrollMouse),
+            Self::BrpExtrasPinchGesture => Arc::new(BrpExtrasPinchGesture),
+            Self::BrpExtrasRotationGesture => Arc::new(BrpExtrasRotationGesture),
+            Self::BrpExtrasDoubleTapGesture => Arc::new(BrpExtrasDoubleTapGesture),
+            Self::BrpExtrasGetDiagnostics => Arc::new(BrpExtrasGetDiagnostics),
 
             // Special tools with their own implementations
             Self::BrpExecute => Arc::new(BrpExecute),
@@ -658,6 +809,7 @@ impl ToolName {
             Self::WorldListComponentsWatch => Arc::new(BevyListWatch),
             Self::BrpListActiveWatches => Arc::new(BrpListActiveWatches),
             Self::BrpStopWatch => Arc::new(BrpStopWatch),
+            Self::GrabSelection => Arc::new(GrabSelection),
             Self::BrpTypeGuide => Arc::new(BrpTypeGuide),
             Self::BrpAllTypeGuides => Arc::new(BrpAllTypeGuides),
 
@@ -665,11 +817,8 @@ impl ToolName {
             Self::BrpDeleteLogs => Arc::new(DeleteLogs),
             #[cfg(feature = "mcp-debug")]
             Self::BrpGetTraceLogPath => Arc::new(GetTraceLogPath),
-            Self::BrpLaunchBevyApp => Arc::new(app_tools::create_launch_bevy_app_handler()),
-            Self::BrpLaunchBevyExample => Arc::new(app_tools::create_launch_bevy_example_handler()),
-            Self::BrpListBevyApps => Arc::new(ListBevyApps),
-            Self::BrpListBevyExamples => Arc::new(ListBevyExamples),
-            Self::BrpListBrpApps => Arc::new(ListBrpApps),
+            Self::BrpLaunch => Arc::new(app_tools::create_launch_handler()),
+            Self::BrpListBevy => Arc::new(ListBevy),
             Self::BrpListLogs => Arc::new(ListLogs),
             Self::BrpReadLog => Arc::new(ReadLog),
             #[cfg(feature = "mcp-debug")]
@@ -680,23 +829,18 @@ impl ToolName {
     }
 
     /// Convert this tool name to a complete `ToolDef`
-    pub fn to_tool_def(self) -> ToolDef {
+    pub(super) fn to_tool_def(self) -> ToolDef {
         ToolDef {
-            tool_name:   self,
+            tool_name: self,
             annotations: self.get_annotations(),
-            handler:     self.create_handler(),
-            parameters:  self.get_parameters(),
+            handler: self.create_handler(),
+            parameters: self.get_parameters(),
         }
-    }
-
-    /// Get all tool definitions for registration with the MCP service
-    pub fn get_all_tool_definitions() -> Vec<ToolDef> {
-        use strum::IntoEnumIterator;
-
-        Self::iter().map(Self::to_tool_def).collect()
     }
 
     /// Get a short human-readable title for this tool
     /// Extracted from the annotation data we already have
-    pub fn short_title(self) -> String { self.get_annotations().title }
+    pub(super) fn short_title(self) -> String {
+        self.get_annotations().title
+    }
 }

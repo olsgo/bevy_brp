@@ -12,19 +12,32 @@ bevy_brp_extras does two things
 
 ## Supported Bevy Versions
 
-| bevy | bevy_brp_extras |
-|------|-----------------|
-| 0.17 | 0.17.0-0.17.2   |
-| 0.16 | 0.1 - 0.2       |
+| bevy        | bevy_brp_extras |
+|-------------|-----------------|
+| 0.18        | 0.18.0-0.19.0   |
+| 0.17        | 0.17.0-0.17.2   |
+| 0.16        | 0.1 - 0.2       |
 
 
-## Features
+## BRP Methods
 
-Adds the following Bevvy Remote Protocol methods:
-- `brp_extras/screenshot` - Capture screenshots of the primary window
-- `brp_extras/shutdown` - Gracefully shutdown the application
-- `brp_extras/send_keys` - Send keyboard input to the application
-- `brp_extras/set_window_title` - Change the primary window title
+- **App Lifecycle**: `screenshot`, `shutdown`, `set_window_title`, `get_diagnostics`
+- **Keyboard**: `send_keys`, `type_text`
+- **Mouse**: `click_mouse`, `double_click_mouse`, `send_mouse_button`, `move_mouse`, `drag_mouse`, `scroll_mouse`
+- **Trackpad Gestures** (macOS): `double_tap_gesture`, `pinch_gesture`, `rotation_gesture`
+
+All methods are prefixed with `brp_extras/` (e.g., `brp_extras/screenshot`). See [docs.rs](https://docs.rs/bevy_brp_extras/) for parameter details.
+
+**Screenshot note**: Your Bevy app must have the `png` feature enabled for screenshots to work. Without it, screenshot files will be created but will be 0 bytes.
+```toml
+bevy = { version = "0.18", features = ["png"] }
+```
+
+**Diagnostics note**: `get_diagnostics` requires the `diagnostics` cargo feature (enabled by default). Disable with `default-features = false` if you don't want `FrameTimeDiagnosticsPlugin` added to your app.
+
+## WASM Support
+
+`bevy_brp_extras` compiles on `wasm32` targets. On native platforms, HTTP transport (`RemoteHttpPlugin`) is added automatically. On WASM, only the BRP methods are registered -- you need to provide your own transport (e.g., a WebSocket relay).
 
 ## Usage
 
@@ -32,7 +45,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy_brp_extras = "0.17.2"
+bevy_brp_extras = "0.19.0"
 ```
 
 Add the plugin to your Bevy app
@@ -65,72 +78,35 @@ BRP_EXTRAS_PORT=8080 cargo run
 
 Port priority: `BRP_EXTRAS_PORT` environment variable > `with_port()` > default port (15702)
 
-## BRP Method Details
+### Custom HTTP Transport
 
-### Screenshot
-- **Method**: `brp_extras/screenshot`
-- **Parameters**:
-  - `path` (string, required): File path where the screenshot should be saved
-- **Returns**: Success status with the absolute path where the screenshot will be saved
+For full control over the HTTP transport (address, port, headers), provide your own `RemoteHttpPlugin`:
 
-**Important**: Your Bevy app must have the `png` feature enabled for screenshots to work:
-```toml
-[dependencies]
-bevy = { version = "0.16", features = ["png"] }
-```
-Without this feature, screenshot files will be created but will be 0 bytes as Bevy cannot encode the image data.
+```rust
+use bevy_remote::http::RemoteHttpPlugin;
 
-**Note**: If you're not using this with [bevy_brp_mcp](https://github.com/natepiano/bevy_brp/mcp), you'll need to tell your AI agent that this method requires a `path` parameter, or let it discover this by trying the method and getting an error message.
-
-### Shutdown
-- **Method**: `brp_extras/shutdown`
-- **Parameters**: None
-- **Returns**: Success status with shutdown confirmation
-
-### Send Keys
-- **Method**: `brp_extras/send_keys`
-- **Parameters**:
-  - `keys` (array of strings, required): Key codes to send (e.g., `["KeyA", "Space", "Enter"]`)
-  - `duration_ms` (number, optional): How long to hold keys before releasing in milliseconds (default: 100, max: 60000)
-- **Returns**: Success status with the keys sent and duration used
-
-Simulates keyboard input by sending press and release events for the specified keys. Keys are pressed simultaneously and held for the specified duration before being released.
-
-**Example:**
-```bash
-# Send "hi" by pressing H and I keys
-curl -X POST http://localhost:15702/brp_extras/send_keys \
-  -H "Content-Type: application/json" \
-  -d '{"keys": ["KeyH", "KeyI"]}'
-
-# Hold space key for 2 seconds
-curl -X POST http://localhost:15702/brp_extras/send_keys \
-  -H "Content-Type: application/json" \
-  -d '{"keys": ["Space"], "duration_ms": 2000}'
+.add_plugins(BrpExtrasPlugin::with_http_plugin(
+    RemoteHttpPlugin::default()
+        .with_port(9000)
+        .with_address([0, 0, 0, 0])
+))
 ```
 
-### Set Window Title
-- **Method**: `brp_extras/set_window_title`
-- **Parameters**:
-  - `title` (string, required): The new title for the primary window
-- **Returns**: Success status with the old and new window titles
+`with_port()` and `with_http_plugin()` are mutually exclusive -- the compiler enforces this.
 
-Changes the title of the primary window.
+### Plugin Composability
 
-**Example:**
-```bash
-curl -X POST http://localhost:15702/brp_extras/set_window_title \
-  -H "Content-Type: application/json" \
-  -d '{"title": "My Game - Level 2"}'
-```
+`BrpExtrasPlugin` composes with existing BRP setups. If `RemotePlugin` or `RemoteHttpPlugin` are already added to your app, `BrpExtrasPlugin` will skip adding them and register its methods into the existing `RemoteMethods` resource.
+
+If `RemoteHttpPlugin` is already present, any port configuration (`with_port()` / `BRP_EXTRAS_PORT`) is ignored and a warning is logged.
 
 ## Integration with bevy_brp_mcp
 
-This crate is designed to work seamlessly with [bevy_brp_mcp](https://github.com/natepiano/bevy_brp/mcp), which provides a Model Context Protocol (MCP) server for controlling Bevy apps. When both are used together:
+This crate is designed to work with [bevy_brp_mcp](https://github.com/natepiano/bevy_brp/mcp), which provides a Model Context Protocol (MCP) server for controlling Bevy apps. When both are used together:
 
 1. Add `BrpExtrasPlugin` to your Bevy app
 2. Use `bevy_brp_mcp` with your AI coding assistant
-3. The additional methods will be automatically discovered and made available in the MCP server so you won't have to manually implement or execute (as with the curl examples above)
+3. All methods are automatically discovered and made available as MCP tools
 
 ## License
 

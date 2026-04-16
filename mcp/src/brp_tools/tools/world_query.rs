@@ -55,7 +55,9 @@ impl<'de> Deserialize<'de> for ComponentSelector {
 }
 
 impl Default for ComponentSelector {
-    fn default() -> Self { Self::Paths(vec![]) }
+    fn default() -> Self {
+        Self::Paths(vec![])
+    }
 }
 
 /// Query data specification - what component data to retrieve

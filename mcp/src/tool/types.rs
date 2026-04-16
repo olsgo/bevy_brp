@@ -21,10 +21,10 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use rmcp::model::CallToolResult;
 
+use super::ParamStruct;
 use super::handler_context::HandlerContext;
 use super::response_builder::ResponseBuilder;
 use crate::error::Result;
-use crate::tool::ParamStruct;
 
 /// Framework-level result for tool handler execution.
 /// Catches infrastructure errors like parameter extraction failures,
@@ -42,6 +42,30 @@ pub struct ToolResult<T, P = ()> {
     pub result: Result<T>,
     /// The parameters that were passed to the tool (if any)
     pub params: Option<P>,
+}
+
+/// Extract typed parameters using the tool framework and run a custom async body.
+///
+/// This keeps request decoding inside the `tool` subsystem while still supporting
+/// custom `call()` implementations in sibling modules.
+pub(super) fn call_with_typed_params<O, P, F, Fut>(
+    ctx: HandlerContext,
+    f: F,
+) -> HandlerResult<'static, ToolResult<O, P>>
+where
+    O: ResultStruct + Send + Sync + 'static,
+    P: ParamStruct + Clone + for<'de> serde::Deserialize<'de> + Send + 'static,
+    F: FnOnce(HandlerContext, P) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<O>> + Send + 'static,
+{
+    Box::pin(async move {
+        let params: P = super::extract_parameter_values(&ctx)?;
+        let result = f(ctx, params.clone()).await;
+        Ok(ToolResult {
+            result,
+            params: Some(params),
+        })
+    })
 }
 
 /// Unified trait for all tool handlers (local and BRP)
@@ -110,7 +134,7 @@ pub trait ToolFn: Send + Sync {
         ctx: HandlerContext,
     ) -> HandlerResult<'_, ToolResult<Self::Output, Self::Params>> {
         Box::pin(async move {
-            let params: Self::Params = ctx.extract_parameter_values()?;
+            let params: Self::Params = super::extract_parameter_values(&ctx)?;
             let result = self.handle_impl_with_context(ctx, params).await;
             Ok(ToolResult {
                 result,

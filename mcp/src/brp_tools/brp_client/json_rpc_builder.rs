@@ -2,40 +2,40 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::constants::JSONRPC_DEFAULT_ID;
+use super::constants::JSONRPC_FIELD;
+use super::constants::JSONRPC_FIELD_ID;
+use super::constants::JSONRPC_FIELD_METHOD;
 use super::constants::JSONRPC_FIELD_PARAMS;
-use crate::brp_tools::brp_client::constants::JSONRPC_FIELD;
-use crate::brp_tools::brp_client::constants::JSONRPC_FIELD_ID;
-use crate::brp_tools::brp_client::constants::JSONRPC_FIELD_METHOD;
-use crate::brp_tools::brp_client::constants::JSONRPC_VERSION;
+use super::constants::JSONRPC_VERSION;
 
 /// Builder for constructing raw JSON-RPC 2.0 requests
 ///
 /// This builder is used for direct HTTP communication with BRP,
 /// primarily by the `check_brp` tool.
-pub struct BrpJsonRpcBuilder {
+pub(super) struct BrpJsonRpcBuilder {
     method: String,
     params: Option<Value>,
-    id:     u64,
+    id: u64,
 }
 
 impl BrpJsonRpcBuilder {
     /// Create a new JSON-RPC request builder
-    pub fn new(method: impl Into<String>) -> Self {
+    pub(super) fn new(method: impl Into<String>) -> Self {
         Self {
             method: method.into(),
             params: None,
-            id:     JSONRPC_DEFAULT_ID,
+            id: JSONRPC_DEFAULT_ID,
         }
     }
 
     /// Set raw params
-    pub fn params(mut self, params: Value) -> Self {
+    pub(super) fn params(mut self, params: Value) -> Self {
         self.params = Some(params);
         self
     }
 
     /// Build the final JSON-RPC request
-    pub fn build(self) -> Value {
+    pub(super) fn build(self) -> Value {
         let mut request = json!({
             JSONRPC_FIELD: JSONRPC_VERSION,
             JSONRPC_FIELD_METHOD: self.method,

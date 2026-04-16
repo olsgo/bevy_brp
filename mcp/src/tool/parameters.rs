@@ -13,10 +13,10 @@ use serde_json::Value;
 use strum::Display;
 use strum::EnumString;
 
-use crate::json_object::IntoStrings;
-use crate::json_object::JsonObjectAccess;
-use crate::json_schema::JsonSchemaType;
-use crate::json_schema::SchemaField;
+use crate::support::IntoStrings;
+use crate::support::JsonObjectAccess;
+use crate::support::JsonSchemaType;
+use crate::support::SchemaField;
 
 /// Trait for parameter types used in tools
 ///
@@ -140,14 +140,16 @@ enum ParameterType {
 #[derive(Clone, Default)]
 pub struct ParameterBuilder {
     properties: Map<String, Value>,
-    required:   Vec<String>,
+    required: Vec<String>,
 }
 
 impl ParameterBuilder {
-    pub fn new() -> Self { Self::default() }
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
 
     /// Add a string property to the schema
-    pub fn add_string_property(mut self, name: &str, description: &str, required: bool) -> Self {
+    fn add_string_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
         prop.insert_field("type", JsonSchemaType::String);
         prop.insert_field("description", description);
@@ -161,12 +163,7 @@ impl ParameterBuilder {
     }
 
     /// Add a string array property to the schema
-    pub fn add_string_array_property(
-        mut self,
-        name: &str,
-        description: &str,
-        required: bool,
-    ) -> Self {
+    fn add_string_array_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
         prop.insert_field("type", JsonSchemaType::Array);
 
@@ -185,12 +182,7 @@ impl ParameterBuilder {
     }
 
     /// Add a number array property to the schema
-    pub fn add_number_array_property(
-        mut self,
-        name: &str,
-        description: &str,
-        required: bool,
-    ) -> Self {
+    fn add_number_array_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
         prop.insert_field("type", JsonSchemaType::Array);
 
@@ -209,7 +201,7 @@ impl ParameterBuilder {
     }
 
     /// Add a number property to the schema
-    pub fn add_number_property(mut self, name: &str, description: &str, required: bool) -> Self {
+    fn add_number_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
         prop.insert_field("type", JsonSchemaType::Number);
         prop.insert_field("description", description);
@@ -223,7 +215,7 @@ impl ParameterBuilder {
     }
 
     /// Add a boolean property to the schema
-    pub fn add_boolean_property(mut self, name: &str, description: &str, required: bool) -> Self {
+    fn add_boolean_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
         prop.insert_field("type", JsonSchemaType::Boolean);
         prop.insert_field("description", description);
@@ -237,7 +229,7 @@ impl ParameterBuilder {
     }
 
     /// Add an object property to the schema
-    pub fn add_object_property(mut self, name: &str, description: &str, required: bool) -> Self {
+    fn add_object_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
         prop.insert_field(SchemaField::Type.as_ref(), JsonSchemaType::Object);
         prop.insert_field(SchemaField::Description.as_ref(), description);
@@ -251,24 +243,19 @@ impl ParameterBuilder {
     }
 
     /// Add a property that can be any JSON type (object, array, string, number, boolean, null)
-    pub fn add_any_property(mut self, name: &str, description: &str, required: bool) -> Self {
+    fn add_any_property(mut self, name: &str, description: &str, required: bool) -> Self {
         let mut prop = Map::new();
-        // Include all JSON types for serde_json::Value compatibility
-        prop.insert(
-            "type".to_string(),
-            vec![
-                JsonSchemaType::Object.as_ref(),
-                JsonSchemaType::Array.as_ref(),
-                JsonSchemaType::String.as_ref(),
-                JsonSchemaType::Number.as_ref(),
-                JsonSchemaType::Boolean.as_ref(),
-                JsonSchemaType::Null.as_ref(),
-            ]
-            .into(),
-        );
-        // When type includes "array", JSON Schema requires an items field
-        // Using empty object {} means array items can be any type
-        prop.insert("items".to_string(), Value::Object(Map::new()));
+        // Use anyOf instead of type array to satisfy validators that require
+        // array schemas to have an "items" field (e.g., Copilot).
+        let any_of: Vec<Value> = vec![
+            serde_json::json!({"type": "object"}),
+            serde_json::json!({"type": "array", "items": {}}),
+            serde_json::json!({"type": "string"}),
+            serde_json::json!({"type": "number"}),
+            serde_json::json!({"type": "boolean"}),
+            serde_json::json!({"type": "null"}),
+        ];
+        prop.insert("anyOf".to_string(), Value::Array(any_of));
         prop.insert_field("description", description);
         self.properties.insert_field(name, prop);
 
@@ -280,7 +267,7 @@ impl ParameterBuilder {
     }
 
     /// Build the final schema
-    pub fn build(self) -> Arc<Map<String, Value>> {
+    pub(super) fn build(self) -> Arc<Map<String, Value>> {
         let mut schema = Map::new();
         schema.insert_field("type", JsonSchemaType::Object);
         schema.insert_field("properties", self.properties);
@@ -322,8 +309,8 @@ fn handle_string_type(type_str: &str, obj: &Map<String, Value>) -> ParameterType
     }
 }
 
-/// Handle array type values from schema type field (for Option<T> types)
-fn handle_type_array(types: &[Value]) -> ParameterType {
+/// Handle array type values from schema type field (for `Option<T>` types)
+fn handle_type_array(types: &[Value], obj: &Map<String, Value>) -> ParameterType {
     let non_null_types: Vec<&str> = types
         .iter()
         .filter_map(|v| v.as_str())
@@ -340,6 +327,8 @@ fn handle_type_array(types: &[Value]) -> ParameterType {
                 ParameterType::Number
             },
             Some(&s) if s == JsonSchemaType::Boolean.as_ref() => ParameterType::Boolean,
+            Some(&s) if s == JsonSchemaType::Object.as_ref() => ParameterType::Object,
+            Some(&s) if s == JsonSchemaType::Array.as_ref() => handle_array_type(obj),
             _ => ParameterType::Any,
         }
     } else {
@@ -418,7 +407,7 @@ fn map_schema_type_to_parameter_type(schema: &Schema) -> ParameterType {
     if let Some(type_value) = obj.get_field(SchemaField::Type) {
         return match type_value {
             Value::String(type_str) => handle_string_type(type_str, obj),
-            Value::Array(types) => handle_type_array(types),
+            Value::Array(types) => handle_type_array(types, obj),
             _ => ParameterType::Any,
         };
     }
@@ -456,7 +445,7 @@ fn map_schema_type_to_parameter_type(schema: &Schema) -> ParameterType {
 /// Build parameters from a `JsonSchema` type directly into a `ParameterBuilder`
 /// All tools with parameters derive `JsonSchema` making it possible for us
 /// to build the parameters from the schema
-pub fn build_parameters_from<T: JsonSchema>() -> ParameterBuilder {
+pub(super) fn build_parameters_from<T: JsonSchema>() -> ParameterBuilder {
     let schema = schemars::schema_for!(T);
     let mut builder = ParameterBuilder::new();
 
@@ -545,5 +534,66 @@ pub fn build_parameters_from<T: JsonSchema>() -> ParameterBuilder {
 }
 
 impl From<ParameterName> for String {
-    fn from(param: ParameterName) -> Self { param.as_ref().to_string() }
+    fn from(param: ParameterName) -> Self {
+        param.as_ref().to_string()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+
+    /// Regression test: `add_any_property` must emit anyOf where the array branch
+    /// includes an "items" key. Without this, Copilot rejects the schema with:
+    ///   "400 Invalid schema: array schema missing items"
+    #[test]
+    fn add_any_property_array_branch_has_items() -> Result<(), Box<dyn Error>> {
+        let schema = ParameterBuilder::new()
+            .add_any_property("value", "Any JSON value", true)
+            .build();
+
+        // 使用 .ok_or(...)? 代替 .expect(...)
+        let any_of = schema["properties"]["value"]["anyOf"]
+            .as_array()
+            .ok_or("anyOf must be an array")?;
+
+        let array_branch = any_of
+            .iter()
+            .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("array"))
+            .ok_or("anyOf must contain an array branch")?;
+
+        assert!(
+            array_branch.get("items").is_some(),
+            "array branch in anyOf must have an 'items' key (Copilot schema validation requirement)"
+        );
+
+        Ok(())
+    }
+
+    /// Verify `add_any_property` covers all six JSON primitive types in anyOf.
+    #[test]
+    fn add_any_property_covers_all_json_types() -> Result<(), Box<dyn Error>> {
+        let schema = ParameterBuilder::new()
+            .add_any_property("value", "Any JSON value", true)
+            .build();
+
+        let any_of = schema["properties"]["value"]["anyOf"]
+            .as_array()
+            .ok_or("anyOf must be an array")?;
+
+        let types: Vec<&str> = any_of
+            .iter()
+            .filter_map(|v| v.get("type")?.as_str())
+            .collect();
+
+        for expected in &["object", "array", "string", "number", "boolean", "null"] {
+            assert!(
+                types.contains(expected),
+                "anyOf must include type '{expected}'"
+            );
+        }
+
+        Ok(())
+    }
 }

@@ -20,16 +20,14 @@ use super::types::Operation;
 use super::types::ResponseStatus;
 use super::types::ResultStructBrpExt;
 use crate::brp_tools::FormatCorrectionStatus;
-use crate::brp_tools::brp_type_guide::TypeGuideEngine;
 use crate::error::Error;
 use crate::error::Result;
 use crate::tool::BrpMethod;
-use crate::tool::ParameterName;
 
 /// Client for executing a BRP operation
 pub struct BrpClient {
     method: BrpMethod,
-    port:   Port,
+    port: Port,
     params: Option<Value>,
 }
 
@@ -41,26 +39,6 @@ impl BrpClient {
             port,
             params,
         }
-    }
-
-    /// Prepare parameters for BRP calls by filtering nulls and Port parameter
-    pub fn prepare_params<T: serde::Serialize>(params: T) -> Result<Option<Value>> {
-        let mut params_json = serde_json::to_value(params)
-            .map_err(|e| Error::InvalidArgument(format!("Failed to serialize parameters: {e}")))?;
-
-        // Only filter out the port field
-        let brp_params = if let Value::Object(ref mut map) = params_json {
-            map.retain(|key, _value| key != &String::from(ParameterName::Port));
-            if map.is_empty() {
-                None
-            } else {
-                Some(params_json)
-            }
-        } else {
-            Some(params_json)
-        };
-
-        Ok(brp_params)
     }
 
     /// Primary execution method with automatic format discovery support
@@ -294,9 +272,11 @@ impl BrpClient {
         error: &BrpClientError,
         extracted_types: Vec<String>,
     ) -> Result<ResponseStatus> {
-        // Create TypeGuideEngine and generate response for extracted types
-        let engine = TypeGuideEngine::new(self.port).await?;
-        let type_guide_response = engine.generate_response(&extracted_types);
+        let type_guide_response = crate::brp_tools::brp_type_guide::generate_type_guide_response(
+            self.port,
+            &extracted_types,
+        )
+        .await?;
 
         Err(Error::tool_call_failed_with_details(
             "Format error - see 'type_guide' field for correct format",
@@ -329,9 +309,9 @@ impl BrpClient {
             };
 
             ResponseStatus::Error(BrpClientError {
-                code:    error.code,
+                code: error.code,
                 message: enhanced_message,
-                data:    error.data,
+                data: error.data,
             })
         } else {
             ResponseStatus::Success(brp_response_json.result)

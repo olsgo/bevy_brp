@@ -27,12 +27,12 @@ const MAX_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
 /// Parameters for a watch connection
 struct WatchConnectionParams {
-    watch_id:   u32,
-    entity_id:  u64,
+    watch_id: u32,
+    entity_id: u64,
     watch_type: String,
     brp_method: BrpMethod,
-    params:     Value,
-    port:       Port,
+    params: Value,
+    port: Port,
 }
 
 /// Process a single SSE line and log the update if valid
@@ -534,11 +534,12 @@ async fn start_watch_task(
     let watch_type_owned = watch_type.to_string();
     let brp_method_owned = brp_method;
 
-    // Perform all operations within a single lock to ensure atomicity
-    let mut manager = WATCH_MANAGER.lock().await;
-
-    // Generate ID while holding the lock
-    let watch_id = manager.next_id();
+    // Reserve the next ID first, but avoid holding the global manager lock across
+    // async filesystem work.
+    let watch_id = {
+        let manager = WATCH_MANAGER.lock().await;
+        manager.next_id()
+    };
 
     // Create log path and logger
     let log_path = BufferedWatchLogger::get_watch_log_path(watch_id, entity_id, watch_type);
@@ -583,29 +584,30 @@ async fn start_watch_task(
         logger,
     ));
 
-    // Register immediately while still holding the lock
-    manager.active_watches.insert(
-        watch_id,
-        (
-            WatchInfo {
-                watch_id,
-                entity_id,
-                watch_type: watch_type.to_string(),
-                log_path: log_path.clone(),
-                port,
-            },
-            handle,
-        ),
-    );
+    {
+        let mut manager = WATCH_MANAGER.lock().await;
 
-    // Release lock by dropping manager
-    drop(manager);
+        // Register after the logger bootstrap succeeds.
+        manager.active_watches.insert(
+            watch_id,
+            (
+                WatchInfo {
+                    watch_id,
+                    entity_id,
+                    watch_type: watch_type.to_string(),
+                    log_path: log_path.clone(),
+                    port,
+                },
+                handle,
+            ),
+        );
+    }
 
     Ok((watch_id, log_path))
 }
 
 /// Start a background task for entity component watching
-pub async fn start_entity_watch_task(
+pub(super) async fn start_entity_watch_task(
     entity_id: u64,
     components: Option<Vec<String>>,
     port: Port,
@@ -639,7 +641,7 @@ pub async fn start_entity_watch_task(
 }
 
 /// Start a background task for entity list watching
-pub async fn start_list_watch_task(entity_id: u64, port: Port) -> Result<(u32, PathBuf)> {
+pub(super) async fn start_list_watch_task(entity_id: u64, port: Port) -> Result<(u32, PathBuf)> {
     let params = serde_json::json!({
         "entity": entity_id
     });

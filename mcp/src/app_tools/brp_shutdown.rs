@@ -8,7 +8,8 @@ use sysinfo::Signal;
 use sysinfo::System;
 use tracing::debug;
 
-use crate::app_tools::support::get_pid_for_port;
+use super::support::get_pid_for_port;
+use super::support::process_matches_name_exact;
 use crate::brp_tools::BrpClient;
 use crate::brp_tools::JSON_RPC_ERROR_METHOD_NOT_FOUND;
 use crate::brp_tools::Port;
@@ -27,7 +28,7 @@ pub struct ShutdownParams {
     pub app_name: String,
     /// The BRP port (default: 15702)
     #[serde(default)]
-    pub port:     Port,
+    pub port: Port,
 }
 
 /// Result from shutting down a Bevy app
@@ -35,20 +36,20 @@ pub struct ShutdownParams {
 pub struct ShutdownResult {
     /// App name that was shut down
     #[to_metadata]
-    app_name:         String,
+    app_name: String,
     /// Process ID
     #[to_metadata]
-    pid:              u32,
+    pid: u32,
     /// Shutdown method used
     #[to_metadata]
-    shutdown_method:  String,
+    shutdown_method: String,
     /// Port where shutdown was attempted
     #[to_metadata]
-    port:             u16,
+    port: u16,
     /// Warning for degraded success (process kill)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[to_metadata(skip_if_none)]
-    warning:          Option<String>,
+    warning: Option<String>,
     /// Message template for formatting responses
     #[to_message]
     message_template: Option<String>,
@@ -235,17 +236,13 @@ fn kill_process(app_name: &str, port: Port) -> Result<Option<u32>> {
             debug!("PID {pid} not found in process list");
             None
         }, |process| {
-            let process_name = process.name().to_string_lossy();
-            if process_name == app_name
-                || process_name == format!("{app_name}.exe")
-                || process_name.strip_suffix(".exe").unwrap_or(&process_name) == app_name
-            {
-                debug!("Verified process name matches: {process_name}");
+            if process_matches_name_exact(process, app_name) {
+                debug!("Verified process name matches: {}", process.name().to_string_lossy());
                 Some(pid)
             } else {
                 debug!(
-                    "Process name mismatch: expected '{app_name}', found '{process_name}' for PID \
-                     {pid}"
+                    "Process name mismatch: expected '{app_name}', found '{}' for PID {pid}",
+                    process.name().to_string_lossy()
                 );
                 None
             }
@@ -277,7 +274,7 @@ fn kill_process(app_name: &str, port: Port) -> Result<Option<u32>> {
 
 /// Error when process is not running
 #[derive(Debug, Clone, Serialize, Deserialize, ResultStruct)]
-pub struct ProcessNotRunningError {
+struct ProcessNotRunningError {
     #[to_error_info]
     app_name: String,
 
@@ -287,7 +284,7 @@ pub struct ProcessNotRunningError {
 
 /// Error when shutdown fails
 #[derive(Debug, Clone, Serialize, Deserialize, ResultStruct)]
-pub struct ShutdownFailedError {
+struct ShutdownFailedError {
     #[to_error_info]
     app_name: String,
 

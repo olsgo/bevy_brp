@@ -2,7 +2,6 @@
 edition = "2024"
 name    = "bevy_brp_test_apps"
 publish = false                # Never publish test apps
-version = "0.3.0"
 
 # Disable automatic discovery to ensure explicit control
 autobins     = false
@@ -22,29 +21,29 @@ path = "examples/extras_plugin.rs"
 name = "no_extras_plugin"
 path = "examples/no_extras_plugin.rs"
 
+[[example]]
+name = "event_test"
+path = "examples/event_test.rs"
+
+[[example]]
+name = "mouse_test"
+path = "examples/mouse_test.rs"
+
+# Same name as the [[bin]] above — tests that brp_list_bevy distinguishes by kind
+[[example]]
+name = "test_app"
+path = "examples/test_app.rs"
+
 
 [dependencies]
 bevy_brp_extras = { path = "../extras" }
 bevy_mesh       = { workspace = true }
+bevy_remote     = { workspace = true }
 bevy_winit      = { workspace = true }
 serde           = { workspace = true }
 
 # Test apps use same features as extras
-bevy = { workspace = true, features = [
-  "bevy_core_pipeline",
-  "bevy_gltf",
-  "bevy_log",
-  "bevy_remote",
-  "bevy_render",
-  "bevy_sprite",
-  "bevy_text",
-  "bevy_ui",
-  "bevy_window",
-  "bevy_winit",
-  "default_font",
-  "png",
-  "x11",
-] }
+bevy = { workspace = true, default-features = true }
 
 [lints]
 workspace = true

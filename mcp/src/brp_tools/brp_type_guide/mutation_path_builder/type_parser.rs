@@ -21,16 +21,16 @@ use nom::sequence::preceded;
 
 /// A parsed type path with optional variant
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedTypePath {
+struct ParsedTypePath {
     /// The full type including module path and generics
     /// e.g., "`core::option::Option`<`bevy_asset::handle::Handle`<`bevy_mesh::mesh::Mesh`>>"
-    pub full_type:       String,
+    pub full_type: String,
     /// The simplified type name with generics but no module paths
     /// e.g., "Option<Handle<Mesh>>"
     pub simplified_type: String,
     /// The variant name if present
     /// e.g., "Some"
-    pub variant:         Option<String>,
+    pub variant: Option<String>,
 }
 
 /// Parse an identifier (alphanumeric + underscore, not starting with digit)
@@ -62,7 +62,9 @@ fn type_path_inner(input: &str) -> IResult<&str, &str> {
 }
 
 /// Parse a complete type path (`module::Type`<Generics>)
-fn type_path(input: &str) -> IResult<&str, &str> { type_path_inner(input) }
+fn type_path(input: &str) -> IResult<&str, &str> {
+    type_path_inner(input)
+}
 
 /// Parse the complete type path with optional variant
 fn full_type_path(input: &str) -> IResult<&str, (&str, Option<&str>)> {
@@ -177,7 +179,7 @@ fn simplify_generics(generics_str: &str) -> String {
 }
 
 /// Parse a complete type path and extract simplified variant name
-pub fn parse_type_with_variant(input: &str) -> Result<ParsedTypePath, String> {
+fn parse_type_with_variant(input: &str) -> Result<ParsedTypePath, String> {
     match full_type_path(input) {
         Ok((remaining, (type_part, variant))) => {
             if !remaining.is_empty() {
@@ -189,9 +191,9 @@ pub fn parse_type_with_variant(input: &str) -> Result<ParsedTypePath, String> {
             let simplified = simplify_type(type_part);
 
             Ok(ParsedTypePath {
-                full_type:       type_part.to_string(),
+                full_type: type_part.to_string(),
                 simplified_type: simplified,
-                variant:         variant.map(ToString::to_string),
+                variant: variant.map(ToString::to_string),
             })
         },
         Err(e) => Err(format!("Failed to parse type path: {e:?}")),
@@ -201,7 +203,7 @@ pub fn parse_type_with_variant(input: &str) -> Result<ParsedTypePath, String> {
 /// Extract a simplified variant name from a full type path
 /// e.g., "`core::option::Option`<`bevy_asset::handle::Handle`<`bevy_mesh::mesh::Mesh`>>`::Some`"
 ///    -> "Option<Handle<Mesh>>`::Some`"
-pub fn extract_simplified_variant_name(type_path: &str) -> String {
+pub(super) fn extract_simplified_variant_name(type_path: &str) -> String {
     match parse_type_with_variant(type_path) {
         Ok(parsed) => {
             if let Some(variant) = parsed.variant {

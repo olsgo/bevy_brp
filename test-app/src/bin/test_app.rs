@@ -1,19 +1,16 @@
 //! Test app with `BrpExtrasPlugin` for testing app launch and extras functionality
 
+use bevy::log::debug;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 
 fn main() {
-    let port = std::env::var("BRP_EXTRAS_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(15702);
-
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: format!("Test Extras Plugin App - BRP Port {port}"),
+                title: "Test Extras Plugin App".to_string(),
                 resolution: (400, 300).into(),
                 focused: false,
                 position: bevy::window::WindowPosition::Centered(
@@ -23,8 +20,8 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(BrpExtrasPlugin)
-        .add_systems(Startup, (setup, minimize_window_on_start))
+        .add_plugins(BrpExtrasPlugin::new().port_in_title(PortDisplay::Always))
+        .add_systems(Startup, (setup, minimize_window_on_start, log_startup))
         .add_systems(Update, rotate_sprite)
         .run();
 }
@@ -66,6 +63,19 @@ fn setup(mut commands: Commands) {
         TextColor(Color::WHITE),
         Transform::from_xyz(-100.0, 120.0, 0.0),
     ));
+}
+
+fn log_startup() {
+    let port = std::env::var("BRP_EXTRAS_PORT").unwrap_or_else(|_| "15702".to_string());
+    debug!("test_app starting on port {port}");
+
+    // Log --marker value if provided (used by args integration test)
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--marker")
+        && let Some(value) = args.get(pos + 1)
+    {
+        info!("MARKER:{value}");
+    }
 }
 
 fn rotate_sprite(time: Res<Time>, mut query: Query<(&mut Transform, &Rotator)>) {

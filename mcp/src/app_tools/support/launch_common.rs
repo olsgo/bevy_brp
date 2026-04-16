@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::path::PathBuf;
@@ -8,56 +9,55 @@ use error_stack::Report;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::errors::NoTargetsFoundError;
-use super::errors::PathDisambiguationError;
-use super::errors::TargetNotFoundAtSpecifiedPath;
+use super::build_freshness::FreshnessCheckResult;
+use super::build_freshness::check_target_freshness;
+use super::cargo_detector::BevyTarget;
 use super::process;
-use crate::app_tools::support::cargo_detector::BevyTarget;
+use crate::app_tools::launch_params::LaunchBevyBinaryParams;
+use crate::app_tools::launch_params::SearchOrder;
 use crate::error::Error;
 use crate::error::Result;
-use crate::tool::HandlerContext;
-use crate::tool::HandlerResult;
-use crate::tool::ParamStruct;
-use crate::tool::ToolFn;
-use crate::tool::ToolResult;
 
 /// Marker type for App launch configuration
 #[derive(Clone)]
-pub struct App;
+struct App;
 
 /// Marker type for Example launch configuration
 #[derive(Clone)]
-pub struct Example;
+struct Example;
 
 /// Parameterized launch configuration for apps and examples
 #[derive(Clone)]
-pub struct LaunchConfig<T> {
-    pub target_name:    String,
-    pub profile:        String,
-    pub path:           Option<String>,
-    pub port:           Port,
-    pub instance_count: InstanceCount,
-    pub features:       Option<Vec<String>>,
-    _phantom:           PhantomData<T>,
+struct LaunchConfig<T> {
+    target_name: String,
+    profile: String,
+    package_name: Option<String>,
+    port: Port,
+    instance_count: InstanceCount,
+    env: Option<HashMap<String, String>>,
+    args: Option<Vec<String>>,
+    _phantom: PhantomData<T>,
 }
 
 impl<T> LaunchConfig<T> {
     /// Create a new launch configuration
-    pub const fn new(
+    const fn new(
         target_name: String,
         profile: String,
-        path: Option<String>,
+        package_name: Option<String>,
         port: Port,
         instance_count: InstanceCount,
-        features: Option<Vec<String>>,
+        env: Option<HashMap<String, String>>,
+        args: Option<Vec<String>>,
     ) -> Self {
         Self {
             target_name,
             profile,
-            path,
+            package_name,
             port,
             instance_count,
-            features,
+            env,
+            args,
             _phantom: PhantomData,
         }
     }
@@ -66,9 +66,9 @@ impl<T> LaunchConfig<T> {
 /// Represents a single launched instance
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchedInstance {
-    pub pid:      u32,
+    pub pid: u32,
     pub log_file: String,
-    pub port:     u16,
+    pub port: u16,
 }
 
 /// Unified result type for launching Bevy apps and examples
@@ -77,37 +77,40 @@ pub struct LaunchedInstance {
 pub struct LaunchResult {
     /// Name of the target that was launched (app or example)
     #[to_metadata(skip_if_none)]
-    target_name:        Option<String>,
+    target_name: Option<String>,
     /// Array of launched instances (1 or more)
     #[to_result]
-    instances:          Vec<LaunchedInstance>,
+    instances: Vec<LaunchedInstance>,
     /// Working directory used for launch
     #[to_metadata(skip_if_none)]
-    working_directory:  Option<String>,
+    working_directory: Option<String>,
     /// Build profile used (debug/release)
     #[to_metadata(skip_if_none)]
-    profile:            Option<String>,
+    profile: Option<String>,
     /// Binary path of the launched app (only for apps, not examples)
     #[to_metadata(skip_if_none)]
-    binary_path:        Option<String>,
+    binary_path: Option<String>,
     /// Launch duration in milliseconds
     #[to_metadata(skip_if_none)]
     launch_duration_ms: Option<u128>,
     /// Launch timestamp
     #[to_metadata(skip_if_none)]
-    launch_timestamp:   Option<String>,
+    launch_timestamp: Option<String>,
     /// Workspace information
     #[to_metadata(skip_if_none)]
-    workspace:          Option<String>,
+    workspace: Option<String>,
     /// Package name containing the example (only for examples)
     #[to_metadata(skip_if_none)]
-    package_name:       Option<String>,
+    package_name: Option<String>,
+    /// Whether the target was launched as an "app" or "example"
+    #[to_metadata(skip_if_none)]
+    launched_as: Option<String>,
     /// Available duplicate paths (for disambiguation errors)
     #[to_metadata(skip_if_none)]
-    duplicate_paths:    Option<Vec<String>>,
+    duplicate_paths: Option<Vec<String>>,
     /// Message template for formatting responses
     #[to_message]
-    message_template:   Option<String>,
+    message_template: Option<String>,
 }
 
 use crate::app_tools::instance_count::InstanceCount;
@@ -116,66 +119,15 @@ use crate::brp_tools::Port;
 
 /// Parameters extracted from launch requests
 pub struct LaunchParams {
-    pub target_name:    String,
-    pub profile:        String,
-    pub path:           Option<String>,
-    pub port:           Port,
+    pub target_name: String,
+    pub profile: String,
+    pub path: Option<String>,
+    pub package_name: Option<String>,
+    pub port: Port,
     pub instance_count: InstanceCount,
-    pub features:       Option<Vec<String>>,
-}
-
-/// Generic launch handler that can work with any `LaunchConfig` type
-pub struct GenericLaunchHandler<T: FromLaunchParams, P: ToLaunchParams> {
-    default_profile: &'static str,
-    _phantom_config: PhantomData<T>,
-    _phantom_params: PhantomData<P>,
-}
-
-impl<T: FromLaunchParams, P: ToLaunchParams> GenericLaunchHandler<T, P> {
-    /// Create a new generic launch handler
-    pub const fn new(default_profile: &'static str) -> Self {
-        Self {
-            default_profile,
-            _phantom_config: PhantomData,
-            _phantom_params: PhantomData,
-        }
-    }
-}
-
-impl<T: FromLaunchParams, P: ToLaunchParams + ParamStruct + for<'de> serde::Deserialize<'de>> ToolFn
-    for GenericLaunchHandler<T, P>
-{
-    type Output = LaunchResult;
-    type Params = P;
-
-    fn call(
-        &self,
-        ctx: HandlerContext,
-    ) -> HandlerResult<'_, ToolResult<Self::Output, Self::Params>> {
-        let default_profile = self.default_profile;
-        Box::pin(async move {
-            // Extract typed parameters - this returns framework error on failure
-            let typed_params: P = ctx.extract_parameter_values()?;
-
-            // Convert to LaunchParams
-            let params = typed_params.to_launch_params(default_profile);
-            // Port is available in params but not needed for launch
-
-            // Get search paths
-            let search_paths = ctx.roots;
-
-            // Create config from params
-            let config = T::from_params(&params);
-
-            // Launch the target
-            let result = launch_target(&config, &search_paths);
-
-            Ok(ToolResult {
-                result,
-                params: Some(typed_params),
-            })
-        })
-    }
+    pub env: Option<HashMap<String, String>>,
+    pub search_order: SearchOrder,
+    pub args: Option<Vec<String>>,
 }
 
 /// Trait for converting typed parameters to `LaunchParams`
@@ -185,13 +137,13 @@ pub trait ToLaunchParams: Send + Sync {
 }
 
 /// Trait for creating launch configs from params
-pub trait FromLaunchParams: LaunchConfigTrait + Sized + Send + Sync {
+trait FromLaunchParams: LaunchConfigTrait + Sized + Send + Sync {
     /// Create a new instance from launch parameters
     fn from_params(params: &LaunchParams) -> Self;
 }
 
 /// Trait for configuring launch behavior for different target types (app vs example)
-pub trait LaunchConfigTrait: Clone {
+trait LaunchConfigTrait: Clone {
     /// The target type constant (App or Example)
     const TARGET_TYPE: TargetType;
 
@@ -201,17 +153,14 @@ pub trait LaunchConfigTrait: Clone {
     /// Get the build profile ("debug" or "release")
     fn profile(&self) -> &str;
 
-    /// Get the optional path for disambiguation
-    fn path(&self) -> Option<&str>;
+    /// Get the optional package name for disambiguation
+    fn package_name(&self) -> Option<&str>;
 
     /// Get the BRP port
     fn port(&self) -> Port;
 
     /// Get the instance count for launching multiple instances
     fn instance_count(&self) -> InstanceCount;
-
-    /// Get the features to enable
-    fn features(&self) -> Option<&Vec<String>>;
 
     /// Set the port (needed for multi-instance launches)
     fn set_port(&mut self, port: Port);
@@ -225,19 +174,40 @@ pub trait LaunchConfigTrait: Clone {
     /// Ensure the target is built, blocking until compilation completes if needed
     /// Returns the build state indicating whether it was fresh, rebuilt, or not found
     fn ensure_built(&self, target: &BevyTarget) -> Result<BuildState> {
+        if Self::TARGET_TYPE == TargetType::App {
+            match check_target_freshness(target, self.profile()) {
+                FreshnessCheckResult::Fresh => return Ok(BuildState::Fresh),
+                FreshnessCheckResult::Stale(reason) => {
+                    tracing::debug!(
+                        "Lock-free freshness check marked {} '{}' stale: {}",
+                        Self::TARGET_TYPE,
+                        self.target_name(),
+                        reason
+                    );
+                },
+                FreshnessCheckResult::Unknown(reason) => {
+                    tracing::debug!(
+                        "Lock-free freshness check was inconclusive for {} '{}': {}",
+                        Self::TARGET_TYPE,
+                        self.target_name(),
+                        reason
+                    );
+                },
+            }
+        }
+
         let manifest_dir = validate_manifest_directory(&target.manifest_path)?;
         run_cargo_build(
             self.target_name(),
             Self::TARGET_TYPE,
             self.profile(),
             manifest_dir,
-            self.features(),
         )
     }
 }
 
 /// Validates and extracts the manifest directory from a manifest path
-pub fn validate_manifest_directory(manifest_path: &Path) -> Result<&Path> {
+fn validate_manifest_directory(manifest_path: &Path) -> Result<&Path> {
     manifest_path.parent().ok_or_else(|| {
         error_stack::Report::new(Error::FileOrPathNotFound(
             "Invalid manifest path".to_string(),
@@ -252,14 +222,23 @@ pub fn validate_manifest_directory(manifest_path: &Path) -> Result<&Path> {
 /// Currently sets:
 /// - `BRP_PORT`: When a port is provided, sets this environment variable for `bevy_brp_extras` to
 ///   read
-pub fn set_brp_env_vars(cmd: &mut Command, port: Option<Port>) {
+fn set_brp_env_vars(cmd: &mut Command, port: Option<Port>) {
     if let Some(port) = port {
         cmd.env(BRP_EXTRAS_PORT_ENV_VAR, port.to_string());
     }
 }
 
+/// Sets user-specified environment variables on a command
+fn set_user_env_vars(cmd: &mut Command, env: Option<&HashMap<String, String>>) {
+    if let Some(env_vars) = env {
+        for (key, value) in env_vars {
+            cmd.env(key, value);
+        }
+    }
+}
+
 /// Setup logging for launch operations and return log file handles
-pub fn setup_launch_logging(
+fn setup_launch_logging(
     name: &str,
     target_type: TargetType,
     profile: &str,
@@ -291,38 +270,48 @@ pub fn setup_launch_logging(
 }
 
 /// Build cargo command for running examples
-pub fn build_cargo_example_command(
+fn build_cargo_example_command(
     example_name: &str,
     profile: &str,
     port: Option<Port>,
-    features: Option<&Vec<String>>,
+    env: Option<&HashMap<String, String>>,
+    args: Option<&[String]>,
 ) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.arg("run").arg("--example").arg(example_name);
-
-    // Add features flag if provided
-    if let Some(features_list) = features {
-        if !features_list.is_empty() {
-            let features_str = features_list.join(",");
-            cmd.arg("--features").arg(features_str);
-        }
-    }
 
     // Add profile flag if release
     if profile == "release" {
         cmd.arg("--release");
     }
 
+    // Separate cargo args from app args with `--`
+    if let Some(user_args) = args {
+        cmd.arg("--").args(user_args);
+    }
+
     // Set BRP-related environment variables
     set_brp_env_vars(&mut cmd, port);
+
+    // Set user-specified environment variables
+    set_user_env_vars(&mut cmd, env);
 
     cmd
 }
 
 /// Build command for running app binaries
-pub fn build_app_command(binary_path: &Path, port: Option<Port>) -> Command {
+fn build_app_command(
+    binary_path: &Path,
+    port: Option<Port>,
+    env: Option<&HashMap<String, String>>,
+    args: Option<&[String]>,
+) -> Command {
     let mut cmd = Command::new(binary_path);
+    if let Some(user_args) = args {
+        cmd.args(user_args);
+    }
     set_brp_env_vars(&mut cmd, port);
+    set_user_env_vars(&mut cmd, env);
     cmd
 }
 
@@ -330,7 +319,7 @@ use super::cargo_detector::TargetType;
 
 /// Represents the state of a build target after cargo build
 #[derive(Debug, Clone, Copy)]
-pub enum BuildState {
+enum BuildState {
     NotFound,
     Fresh,
     Rebuilt,
@@ -342,7 +331,6 @@ fn build_cargo_command(
     target_type: TargetType,
     profile: &str,
     manifest_dir: &Path,
-    features: Option<&Vec<String>>,
 ) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(manifest_dir);
@@ -350,14 +338,6 @@ fn build_cargo_command(
 
     // Add target-specific arguments
     target_type.add_cargo_args(&mut cmd, target_name);
-
-    // Add features flag if provided
-    if let Some(features_list) = features {
-        if !features_list.is_empty() {
-            let features_str = features_list.join(",");
-            cmd.arg("--features").arg(features_str);
-        }
-    }
 
     // Add profile flag if release
     if profile == "release" {
@@ -454,14 +434,13 @@ fn log_build_result(build_state: BuildState, target_name: &str, target_type: Tar
 }
 
 /// Run cargo build for a target and block until completion
-pub fn run_cargo_build(
+fn run_cargo_build(
     target_name: &str,
     target_type: TargetType,
     profile: &str,
     manifest_dir: &Path,
-    features: Option<&Vec<String>>,
 ) -> Result<BuildState> {
-    let mut cmd = build_cargo_command(target_name, target_type, profile, manifest_dir, features);
+    let mut cmd = build_cargo_command(target_name, target_type, profile, manifest_dir);
     let output = execute_build_command(&mut cmd, target_name, target_type, profile, manifest_dir)?;
     let build_state = parse_build_output(&output.stdout, target_name);
     log_build_result(build_state, target_name, target_type);
@@ -536,6 +515,7 @@ fn build_launch_result<T: LaunchConfigTrait>(
         } else {
             None
         },
+        launched_as: Some(T::TARGET_TYPE.to_string()),
         duplicate_paths: None,
         message_template: Some(message),
     }
@@ -571,134 +551,14 @@ fn prepare_launch_environment<T: LaunchConfigTrait>(
     ))
 }
 
-/// Create error details for `ToolError` with common fields populated
-fn create_error_details<T: LaunchConfigTrait>(
-    config: &T,
-    duplicate_paths: Option<Vec<String>>,
-) -> serde_json::Value {
-    serde_json::json!({
-        "target_name": config.target_name(),
-        "target_type": T::TARGET_TYPE,
-        "profile": config.profile(),
-        "path": config.path(),
-        "port": config.port(),
-        "duplicate_paths": duplicate_paths
-    })
-}
-
-/// Find and validate a Bevy target based on configuration
-fn find_and_validate_target<T: LaunchConfigTrait>(
-    config: &T,
-    search_paths: &[PathBuf],
-) -> Result<BevyTarget> {
-    use super::scanning;
-
-    // Get the target type from the config
-    let target_type = T::TARGET_TYPE;
-
-    // First, find all targets with the given name to check for duplicates
-    let all_targets =
-        scanning::find_all_targets_by_name(config.target_name(), Some(target_type), search_paths);
-
-    // If multiple targets exist, we always want to include their paths
-    let duplicate_paths = if all_targets.len() > 1 {
-        Some(
-            all_targets
-                .iter()
-                .map(|target| target.relative_path.to_string_lossy().to_string())
-                .collect(),
-        )
-    } else {
-        None
-    };
-
-    // Find the specific target with path disambiguation (reuse all_targets to avoid duplicate scan)
-    let target = match scanning::find_required_target_with_path(
-        config.target_name(),
-        target_type,
-        config.path(),
-        search_paths,
-        Some(all_targets.clone()),
-    ) {
-        Ok(target) => target,
-        Err(err) => {
-            use crate::error::Error;
-
-            // For any other error when duplicates exist, return disambiguation error with paths
-            if let Some(available_paths) = duplicate_paths {
-                let path_disambiguation_error = PathDisambiguationError::new(
-                    available_paths,
-                    config.target_name().to_string(),
-                    T::TARGET_TYPE.to_string(),
-                );
-
-                Err(Error::Structured {
-                    result: Box::new(path_disambiguation_error),
-                })?;
-            }
-
-            // For non-duplicate errors, determine appropriate structured error
-            match all_targets.len() {
-                0 => {
-                    // No targets found at all
-                    let no_targets_error = NoTargetsFoundError::new(
-                        config.target_name().to_string(),
-                        T::TARGET_TYPE.to_string(),
-                    );
-                    return Err(Error::Structured {
-                        result: Box::new(no_targets_error),
-                    })?;
-                },
-                1 => {
-                    // Exactly one target exists but path disambiguation failed
-                    let available_paths: Vec<String> = all_targets
-                        .iter()
-                        .map(|target| target.relative_path.to_string_lossy().to_string())
-                        .collect();
-                    let target_not_found_error = TargetNotFoundAtSpecifiedPath::new(
-                        config.target_name().to_string(),
-                        T::TARGET_TYPE.to_string(),
-                        config.path().map(std::string::ToString::to_string),
-                        available_paths,
-                    );
-                    return Err(Error::Structured {
-                        result: Box::new(target_not_found_error),
-                    })?;
-                },
-                _ => {
-                    // This should not happen due to duplicate_paths logic above, but fallback
-                    return Err(Report::new(Error::tool_call_failed_with_details(
-                        err.to_string(),
-                        create_error_details(config, None),
-                    )));
-                },
-            }
-        },
-    };
-
-    Ok(target)
-}
-
 /// Validate that the port range for multi-instance launching is within bounds
-fn validate_port_range(base_port: u16, instance_count: usize) -> Result<()> {
+fn validate_port_range(base_port: u16, instance_count: u16) -> Result<()> {
     use crate::brp_tools::MAX_VALID_PORT;
 
-    // Convert instance_count to u16, failing if it's too large
-    let count_u16 = u16::try_from(instance_count).map_err(|_| {
-        Error::tool_call_failed(format!(
-            "Instance count {} is too large (maximum is {})",
-            instance_count,
-            u16::MAX
-        ))
-    })?;
-
-    // MAX_VALID_PORT is imported from brp_tools::constants (65534)
-    if base_port.saturating_add(count_u16.saturating_sub(1)) > MAX_VALID_PORT {
+    if base_port.saturating_add(instance_count.saturating_sub(1)) > MAX_VALID_PORT {
         return Err(Error::tool_call_failed(format!(
-            "Port range {} to {} exceeds maximum valid port {}",
-            base_port,
-            base_port.saturating_add(count_u16.saturating_sub(1)),
-            MAX_VALID_PORT
+            "Port range {base_port} to {} exceeds maximum valid port {MAX_VALID_PORT}",
+            base_port.saturating_add(instance_count.saturating_sub(1)),
         ))
         .into());
     }
@@ -709,7 +569,7 @@ fn validate_port_range(base_port: u16, instance_count: usize) -> Result<()> {
 fn launch_instances<T: LaunchConfigTrait>(
     config: &T,
     target: &BevyTarget,
-    instance_count: usize,
+    instance_count: u16,
     base_port: u16,
 ) -> Result<(Vec<u32>, Vec<PathBuf>, Vec<u16>)> {
     let mut all_pids = Vec::new();
@@ -717,9 +577,7 @@ fn launch_instances<T: LaunchConfigTrait>(
     let mut all_ports = Vec::new();
 
     for i in 0..instance_count {
-        // Use saturating conversion - validated in validate_port_range that this won't overflow
-        let i_u16 = u16::try_from(i).unwrap_or(u16::MAX);
-        let port = Port(base_port.saturating_add(i_u16));
+        let port = Port(base_port.saturating_add(i));
 
         // Create a modified config with the updated port for this instance
         let mut instance_config = config.clone();
@@ -727,15 +585,27 @@ fn launch_instances<T: LaunchConfigTrait>(
 
         // Prepare launch environment with the instance-specific config
         let (cmd, manifest_dir, log_file_path, log_file_for_redirect) =
-            prepare_launch_environment(&instance_config, target)?;
+            match prepare_launch_environment(&instance_config, target) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    cleanup_partial_launches(&all_pids);
+                    return Err(error);
+                },
+            };
 
         // Use launch_detached_process for proper zombie prevention and process group isolation
-        let pid = process::launch_detached_process(
+        let pid = match process::launch_detached_process(
             &cmd,
             &manifest_dir,
             log_file_for_redirect,
             config.target_name(),
-        )?;
+        ) {
+            Ok(pid) => pid,
+            Err(error) => {
+                cleanup_partial_launches(&all_pids);
+                return Err(error);
+            },
+        };
 
         all_pids.push(pid);
         all_log_files.push(log_file_path);
@@ -743,6 +613,33 @@ fn launch_instances<T: LaunchConfigTrait>(
     }
 
     Ok((all_pids, all_log_files, all_ports))
+}
+
+fn cleanup_partial_launches(pids: &[u32]) {
+    use sysinfo::{Signal, System};
+
+    if pids.is_empty() {
+        return;
+    }
+
+    let mut system = System::new_all();
+    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    for pid in pids {
+        if let Some(process) = system.process(sysinfo::Pid::from_u32(*pid)) {
+            if process.kill_with(Signal::Term).unwrap_or(false) {
+                tracing::warn!(
+                    pid = *pid,
+                    "terminated partially launched Bevy instance after launch failure"
+                );
+            } else {
+                tracing::warn!(
+                    pid = *pid,
+                    "failed to terminate partially launched Bevy instance after launch failure"
+                );
+            }
+        }
+    }
 }
 
 /// Handle target discovery errors and convert to appropriate error types
@@ -762,10 +659,102 @@ fn handle_target_discovery_error(error: Report<Error>) -> Report<Error> {
     Error::tool_call_failed_with_details(error_message, details).into()
 }
 
-/// Generic function to launch a Bevy target (app or example)
-pub fn launch_target<T: LaunchConfigTrait>(
+/// Launch a Bevy target using unified search: tries one target type first, then the other.
+/// The `search_order` parameter determines which type is tried first.
+pub fn launch_bevy_target(
+    typed_params: LaunchBevyBinaryParams,
+    roots: Vec<PathBuf>,
+    default_profile: &'static str,
+) -> Result<LaunchResult> {
+    use super::errors::AvailableTarget;
+    use super::errors::UnifiedTargetNotFoundError;
+    use super::scanning;
+
+    let params = typed_params.to_launch_params(default_profile);
+
+    // Use `path` as search root override if provided, otherwise use MCP workspace roots
+    let search_roots = params
+        .path
+        .as_ref()
+        .map_or(roots, |path| vec![PathBuf::from(path)]);
+
+    // Determine search order
+    let (first, second) = match params.search_order {
+        SearchOrder::App => (TargetType::App, TargetType::Example),
+        SearchOrder::Example => (TargetType::Example, TargetType::App),
+    };
+
+    // When a user-specified path is provided, post-filter targets to only those
+    // whose manifest directory is under that path. Cargo metadata resolves workspace
+    // members up to the workspace root, which can expand the scope beyond what the user intended.
+    let scope_path = params.path.as_ref().map(PathBuf::from);
+
+    // Try first type
+    let mut first_targets =
+        scanning::find_all_targets_by_name(&params.target_name, Some(first), &search_roots);
+    if let Some(ref scope) = scope_path {
+        first_targets = scanning::filter_targets_by_path_scope(first_targets, scope);
+    }
+    if !first_targets.is_empty() {
+        return launch_found_target(first, first_targets, &params, &search_roots);
+    }
+
+    // Try second type
+    let mut second_targets =
+        scanning::find_all_targets_by_name(&params.target_name, Some(second), &search_roots);
+    if let Some(ref scope) = scope_path {
+        second_targets = scanning::filter_targets_by_path_scope(second_targets, scope);
+    }
+    if !second_targets.is_empty() {
+        return launch_found_target(second, second_targets, &params, &search_roots);
+    }
+
+    // Neither found — build enriched error with ALL available targets
+    let mut all_targets = scanning::collect_all_bevy_targets(&search_roots);
+    if let Some(ref scope) = scope_path {
+        all_targets = scanning::filter_targets_by_path_scope(all_targets, scope);
+    }
+    let available: Vec<AvailableTarget> = all_targets
+        .into_iter()
+        .map(|t| AvailableTarget {
+            name: t.name,
+            kind: t.target_type.to_string(),
+            path: t.relative_path.to_string_lossy().to_string(),
+        })
+        .collect();
+
+    let error = UnifiedTargetNotFoundError::new(params.target_name, available);
+    Err(Error::Structured {
+        result: Box::new(error),
+    }
+    .into())
+}
+
+/// Launch a target that was found by name, handling disambiguation and dispatch
+fn launch_found_target(
+    target_type: TargetType,
+    cached_targets: Vec<BevyTarget>,
+    params: &LaunchParams,
+    roots: &[PathBuf],
+) -> Result<LaunchResult> {
+    match target_type {
+        TargetType::App => {
+            let config = LaunchConfig::<App>::from_params(params);
+            // Pass cached_targets through find_and_validate_target path
+            launch_target_with_cached(&config, roots, cached_targets)
+        },
+        TargetType::Example => {
+            let config = LaunchConfig::<Example>::from_params(params);
+            launch_target_with_cached(&config, roots, cached_targets)
+        },
+    }
+}
+
+/// Generic function to launch a Bevy target with pre-cached scan results
+fn launch_target_with_cached<T: LaunchConfigTrait>(
     config: &T,
     search_paths: &[PathBuf],
+    cached_targets: Vec<BevyTarget>,
 ) -> Result<LaunchResult> {
     use std::time::Instant;
 
@@ -773,12 +762,11 @@ pub fn launch_target<T: LaunchConfigTrait>(
 
     let launch_start = Instant::now();
 
-    // Log additional debug info
     debug!("Environment variable: BRP_EXTRAS_PORT={}", config.port());
 
-    // Find and validate the target
-    let target =
-        find_and_validate_target(config, search_paths).map_err(handle_target_discovery_error)?;
+    // Find and validate the target using cached scan results
+    let target = find_and_validate_target_with_cache(config, search_paths, cached_targets)
+        .map_err(handle_target_discovery_error)?;
 
     // Ensure the target is built (blocks until compilation completes if needed)
     let build_state = config.ensure_built(&target)?;
@@ -794,14 +782,11 @@ pub fn launch_target<T: LaunchConfigTrait>(
     let instance_count = *config.instance_count();
     let base_port = *config.port();
 
-    // Validate entire port range fits within valid bounds
     validate_port_range(base_port, instance_count)?;
 
-    // Launch all instances
     let (all_pids, all_log_files, all_ports) =
         launch_instances(config, &target, instance_count, base_port)?;
 
-    // Build unified result (works for both single and multi)
     Ok(build_launch_result(
         all_pids,
         all_log_files,
@@ -812,15 +797,35 @@ pub fn launch_target<T: LaunchConfigTrait>(
     ))
 }
 
+/// Find and validate a target using pre-cached scan results
+fn find_and_validate_target_with_cache<T: LaunchConfigTrait>(
+    config: &T,
+    search_paths: &[PathBuf],
+    cached_targets: Vec<BevyTarget>,
+) -> Result<BevyTarget> {
+    use super::scanning;
+
+    // Delegate to scanning which now handles all error cases (disambiguation, not-found-in-package)
+    scanning::find_required_target_with_package_name(
+        config.target_name(),
+        T::TARGET_TYPE,
+        config.package_name(),
+        search_paths,
+        Some(cached_targets),
+    )
+    .map_err(|e| Report::new(e))
+}
+
 impl FromLaunchParams for LaunchConfig<App> {
     fn from_params(params: &LaunchParams) -> Self {
         Self::new(
             params.target_name.clone(),
             params.profile.clone(),
-            params.path.clone(),
+            params.package_name.clone(),
             params.port,
             params.instance_count,
-            params.features.clone(),
+            params.env.clone(),
+            params.args.clone(),
         )
     }
 }
@@ -828,25 +833,42 @@ impl FromLaunchParams for LaunchConfig<App> {
 impl LaunchConfigTrait for LaunchConfig<App> {
     const TARGET_TYPE: TargetType = TargetType::App;
 
-    fn target_name(&self) -> &str { &self.target_name }
-
-    fn profile(&self) -> &str { &self.profile }
-
-    fn path(&self) -> Option<&str> { self.path.as_deref() }
-
-    fn port(&self) -> Port { self.port }
-
-    fn instance_count(&self) -> InstanceCount { self.instance_count }
-
-    fn features(&self) -> Option<&Vec<String>> { self.features.as_ref() }
-
-    fn set_port(&mut self, port: Port) { self.port = port; }
-
-    fn build_command(&self, target: &BevyTarget) -> Command {
-        build_app_command(&target.get_binary_path(self.profile()), Some(self.port))
+    fn target_name(&self) -> &str {
+        &self.target_name
     }
 
-    fn extra_log_info(&self, _target: &BevyTarget) -> Option<String> { None }
+    fn profile(&self) -> &str {
+        &self.profile
+    }
+
+    fn package_name(&self) -> Option<&str> {
+        self.package_name.as_deref()
+    }
+
+    fn port(&self) -> Port {
+        self.port
+    }
+
+    fn instance_count(&self) -> InstanceCount {
+        self.instance_count
+    }
+
+    fn set_port(&mut self, port: Port) {
+        self.port = port;
+    }
+
+    fn build_command(&self, target: &BevyTarget) -> Command {
+        build_app_command(
+            &target.get_binary_path(self.profile()),
+            Some(self.port),
+            self.env.as_ref(),
+            self.args.as_deref(),
+        )
+    }
+
+    fn extra_log_info(&self, _target: &BevyTarget) -> Option<String> {
+        None
+    }
 }
 
 impl FromLaunchParams for LaunchConfig<Example> {
@@ -854,10 +876,11 @@ impl FromLaunchParams for LaunchConfig<Example> {
         Self::new(
             params.target_name.clone(),
             params.profile.clone(),
-            params.path.clone(),
+            params.package_name.clone(),
             params.port,
             params.instance_count,
-            params.features.clone(),
+            params.env.clone(),
+            params.args.clone(),
         )
     }
 }
@@ -865,22 +888,38 @@ impl FromLaunchParams for LaunchConfig<Example> {
 impl LaunchConfigTrait for LaunchConfig<Example> {
     const TARGET_TYPE: TargetType = TargetType::Example;
 
-    fn target_name(&self) -> &str { &self.target_name }
+    fn target_name(&self) -> &str {
+        &self.target_name
+    }
 
-    fn profile(&self) -> &str { &self.profile }
+    fn profile(&self) -> &str {
+        &self.profile
+    }
 
-    fn path(&self) -> Option<&str> { self.path.as_deref() }
+    fn package_name(&self) -> Option<&str> {
+        self.package_name.as_deref()
+    }
 
-    fn port(&self) -> Port { self.port }
+    fn port(&self) -> Port {
+        self.port
+    }
 
-    fn instance_count(&self) -> InstanceCount { self.instance_count }
+    fn instance_count(&self) -> InstanceCount {
+        self.instance_count
+    }
 
-    fn features(&self) -> Option<&Vec<String>> { self.features.as_ref() }
-
-    fn set_port(&mut self, port: Port) { self.port = port; }
+    fn set_port(&mut self, port: Port) {
+        self.port = port;
+    }
 
     fn build_command(&self, _target: &BevyTarget) -> Command {
-        build_cargo_example_command(&self.target_name, self.profile(), Some(self.port), self.features.as_ref())
+        build_cargo_example_command(
+            &self.target_name,
+            self.profile(),
+            Some(self.port),
+            self.env.as_ref(),
+            self.args.as_deref(),
+        )
     }
 
     fn extra_log_info(&self, target: &BevyTarget) -> Option<String> {

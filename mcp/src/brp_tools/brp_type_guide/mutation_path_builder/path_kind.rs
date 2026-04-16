@@ -7,11 +7,11 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::super::brp_type_name::BrpTypeName;
+use super::super::struct_field_name::StructFieldName;
 use super::super::type_kind::TypeKind;
-use super::enum_builder::OptionClassification;
-use super::new_types::StructFieldName;
 use super::new_types::VariantName;
-use super::types::EnumPathInfo;
+use super::option_classification::OptionClassification;
+use super::types_internal::EnumPathInfo;
 
 /// A semantic identifier for mutation paths in the builder system
 ///
@@ -21,64 +21,78 @@ use super::types::EnumPathInfo;
 /// - `IndexedElement`/`ArrayElement`: index as string (e.g., "0", "1")
 /// - `RootValue`: empty string ""
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MutationPathDescriptor(String);
+pub(super) struct MutationPathDescriptor(String);
 
 impl Deref for MutationPathDescriptor {
     type Target = str;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl Borrow<str> for MutationPathDescriptor {
-    fn borrow(&self) -> &str { &self.0 }
+    fn borrow(&self) -> &str {
+        &self.0
+    }
 }
 
 impl From<String> for MutationPathDescriptor {
-    fn from(s: String) -> Self { Self(s) }
+    fn from(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl From<&str> for MutationPathDescriptor {
-    fn from(s: &str) -> Self { Self(s.to_string()) }
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
 }
 
 impl From<StructFieldName> for MutationPathDescriptor {
-    fn from(field_name: StructFieldName) -> Self { Self(field_name.to_string()) }
+    fn from(field_name: StructFieldName) -> Self {
+        Self(field_name.to_string())
+    }
 }
 
 impl From<&StructFieldName> for MutationPathDescriptor {
-    fn from(field_name: &StructFieldName) -> Self { Self(field_name.to_string()) }
+    fn from(field_name: &StructFieldName) -> Self {
+        Self(field_name.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub enum PathKind {
+pub(super) enum PathKind {
     /// Replace the entire value (root mutation with empty path)
     RootValue { type_name: BrpTypeName },
     /// Mutate a field in a struct
     StructField {
-        field_name:  StructFieldName,
-        type_name:   BrpTypeName,
+        field_name: StructFieldName,
+        type_name: BrpTypeName,
         parent_type: BrpTypeName,
     },
     /// Mutate an element in a tuple by index
     /// Applies to tuple elements, enums variants, including generics such as Option<T>
     IndexedElement {
-        index:       usize,
-        type_name:   BrpTypeName,
+        index: usize,
+        type_name: BrpTypeName,
         parent_type: BrpTypeName,
     },
     /// Mutate an element in an array
     ArrayElement {
-        index:       usize,
-        type_name:   BrpTypeName,
+        index: usize,
+        type_name: BrpTypeName,
         parent_type: BrpTypeName,
     },
 }
 
 impl PathKind {
     /// Create a new `RootValue`
-    pub const fn new_root_value(type_name: BrpTypeName) -> Self { Self::RootValue { type_name } }
+    pub(super) const fn new_root_value(type_name: BrpTypeName) -> Self {
+        Self::RootValue { type_name }
+    }
 
     /// Create a new `IndexedElement`
-    pub const fn new_indexed_element(
+    pub(super) const fn new_indexed_element(
         index: usize,
         type_name: BrpTypeName,
         parent_type: BrpTypeName,
@@ -91,7 +105,7 @@ impl PathKind {
     }
 
     /// Get the type name being processed (matches `PathLocation::type_name()` behavior)
-    pub const fn type_name(&self) -> &BrpTypeName {
+    pub(super) const fn type_name(&self) -> &BrpTypeName {
         match self {
             Self::RootValue { type_name }
             | Self::StructField { type_name, .. }
@@ -138,7 +152,7 @@ impl PathKind {
 
     /// Extract a descriptor suitable for `HashMap<MutationPathDescriptor, Value>` from this
     /// `PathKind` Used by `MutationPathBuilder` to build `child_examples` `HashMap`
-    pub fn to_mutation_path_descriptor(&self) -> MutationPathDescriptor {
+    pub(super) fn to_mutation_path_descriptor(&self) -> MutationPathDescriptor {
         match self {
             Self::StructField { field_name, .. } => MutationPathDescriptor::from(field_name),
             Self::IndexedElement { index, .. } | Self::ArrayElement { index, .. } => {
@@ -149,7 +163,7 @@ impl PathKind {
     }
 
     /// Generate a human-readable description for this mutation
-    pub fn description(
+    pub(super) fn description(
         &self,
         type_kind: &TypeKind,
         enum_path_info: Option<&EnumPathInfo>,

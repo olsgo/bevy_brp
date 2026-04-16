@@ -6,26 +6,26 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
-use super::super::new_types::StructFieldName;
+use super::super::super::struct_field_name::StructFieldName;
+use super::super::super::variant_signature::VariantSignature;
 use super::super::new_types::VariantName;
 use super::super::type_parser;
-use super::variant_signature::VariantSignature;
 use crate::brp_tools::brp_type_guide::BrpTypeName;
 use crate::error::Error;
 use crate::error::Result;
-use crate::json_object::JsonObjectAccess;
-use crate::json_schema::SchemaField;
+use crate::support::JsonObjectAccess;
+use crate::support::SchemaField;
 
 /// Type-safe enum variant information
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VariantKind {
-    pub name:      VariantName,
-    pub signature: VariantSignature,
+pub(super) struct VariantKind {
+    pub(super) name: VariantName,
+    pub(super) signature: VariantSignature,
 }
 
 impl VariantKind {
     /// Extract variant information from a schema variant
-    pub fn from_schema_variant(
+    pub(super) fn from_schema_variant(
         v: &Value,
         registry: &HashMap<BrpTypeName, Value>,
         enum_type: &BrpTypeName,
@@ -42,7 +42,7 @@ impl VariantKind {
 
             let qualified_name = format!("{type_name}::{variant_str}");
             return Ok(Self {
-                name:      VariantName::from(qualified_name),
+                name: VariantName::from(qualified_name),
                 signature: VariantSignature::Unit,
             });
         }
@@ -67,7 +67,7 @@ impl VariantKind {
 
         // Unit variant (no fields)
         Ok(Self {
-            name:      variant_name,
+            name: variant_name,
             signature: VariantSignature::Unit,
         })
     }

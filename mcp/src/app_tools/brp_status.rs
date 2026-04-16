@@ -6,7 +6,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use sysinfo::System;
 
-use crate::app_tools::support::get_pid_for_port;
+use super::support::get_pid_for_port;
+use super::support::normalize_process_name;
+use super::support::process_matches_name_exact;
 use crate::brp_tools::Port;
 use crate::brp_tools::ResponseStatus;
 use crate::brp_tools::{self};
@@ -24,7 +26,7 @@ pub struct StatusParams {
     pub app_name: String,
     /// The BRP port (default: 15702)
     #[serde(default)]
-    pub port:     Port,
+    pub port: Port,
 }
 
 /// Result from checking status of a Bevy app
@@ -32,13 +34,13 @@ pub struct StatusParams {
 pub struct StatusResult {
     /// App name
     #[to_metadata]
-    app_name:         String,
+    app_name: String,
     /// Process ID
     #[to_metadata]
-    pid:              u32,
+    pid: u32,
     /// Port where BRP is responding
     #[to_metadata]
-    port:             u16,
+    port: u16,
     /// Message template for formatting responses
     #[to_message(
         message_template = "Process '{app_name}' (PID: {pid}) is running with BRP enabled on port {port}"
@@ -56,7 +58,7 @@ async fn handle_impl(params: StatusParams) -> Result<StatusResult> {
 
 /// Error when process is not found
 #[derive(Debug, Clone, Serialize, Deserialize, ResultStruct)]
-pub struct ProcessNotFoundError {
+struct ProcessNotFoundError {
     #[to_error_info]
     app_name: String,
 
@@ -75,7 +77,7 @@ pub struct ProcessNotFoundError {
 
 /// Error when process is running but BRP not responding
 #[derive(Debug, Clone, Serialize, Deserialize, ResultStruct)]
-pub struct BrpNotRespondingError {
+struct BrpNotRespondingError {
     #[to_error_info]
     app_name: String,
 
@@ -89,23 +91,6 @@ pub struct BrpNotRespondingError {
         message_template = "Process '{app_name}' (PID: {pid}) is running but not responding to BRP on port {port}. Make sure RemotePlugin is added to your Bevy app."
     )]
     message_template: String,
-}
-
-/// Normalize process name for robust matching
-fn normalize_process_name(name: &str) -> String {
-    // Convert to lowercase and remove common path separators and extensions
-    let name = name.to_lowercase();
-
-    // Remove path components - get just the base name
-    let base_name = name.split(['/', '\\']).next_back().unwrap_or(&name);
-
-    // Remove common executable extensions
-    base_name
-        .strip_suffix(".exe")
-        .or_else(|| base_name.strip_suffix(".app"))
-        .or_else(|| base_name.strip_suffix(".bin"))
-        .unwrap_or(base_name)
-        .to_string()
 }
 
 /// Check if process matches the target app name with substring match
@@ -206,25 +191,21 @@ async fn check_brp_for_app(app_name: &str, port: Port) -> Result<StatusResult> {
     // Never fall through to searching for other processes by name
     if let Some(pid) = pid_from_port {
         // We found a process on this port - verify the name if possible
-        if let Some(process) = system.process(sysinfo::Pid::from_u32(pid)) {
-            let process_name = process.name().to_string_lossy();
-            let normalized_process_name = normalize_process_name(&process_name);
-            let normalized_target = normalize_process_name(app_name);
-
-            if normalized_process_name == normalized_target {
-                // SUCCESS: Found process on port with matching name
-                if brp_responsive {
-                    return Ok(StatusResult::new(app_name.to_string(), pid, port.0));
-                }
-                // Process running but BRP not responding
-                return Err(Error::Structured {
-                    result: Box::new(BrpNotRespondingError::new(
-                        app_name.to_string(),
-                        pid,
-                        port.0,
-                    )),
-                })?;
+        if let Some(process) = system.process(sysinfo::Pid::from_u32(pid))
+            && process_matches_name_exact(process, app_name)
+        {
+            // SUCCESS: Found process on port with matching name
+            if brp_responsive {
+                return Ok(StatusResult::new(app_name.to_string(), pid, port.0));
             }
+            // Process running but BRP not responding
+            return Err(Error::Structured {
+                result: Box::new(BrpNotRespondingError::new(
+                    app_name.to_string(),
+                    pid,
+                    port.0,
+                )),
+            })?;
         }
 
         // We found a PID on the port, but either:
@@ -254,12 +235,8 @@ async fn check_brp_for_app(app_name: &str, port: Port) -> Result<StatusResult> {
     // Fallback: ONLY runs when NO PID found on the port at all
     // Check if process exists by exact name match (running on different port)
     let exact_match_by_name = system.processes().values().find(|process| {
-        !matches!(process.status(), sysinfo::ProcessStatus::Zombie) && {
-            let process_name = process.name().to_string_lossy();
-            let normalized_process_name = normalize_process_name(&process_name);
-            let normalized_target = normalize_process_name(app_name);
-            normalized_process_name == normalized_target
-        }
+        !matches!(process.status(), sysinfo::ProcessStatus::Zombie)
+            && process_matches_name_exact(process, app_name)
     });
 
     if let Some(process) = exact_match_by_name {

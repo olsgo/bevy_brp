@@ -16,6 +16,8 @@ pub enum ToolCategory {
     DynamicBrp,
     #[strum(serialize = "Entity")]
     Entity,
+    #[strum(serialize = "Event")]
+    Event,
     #[strum(serialize = "Extras")]
     Extras,
     #[strum(serialize = "Logging")]
@@ -31,9 +33,9 @@ pub enum ToolCategory {
 /// Ergonomic tool annotations for BRP tools
 #[derive(Debug, Clone)]
 pub struct Annotation {
-    pub title:                 String,
-    pub category:              ToolCategory,
-    pub environment_impact:    EnvironmentImpact,
+    pub title: String,
+    pub category: ToolCategory,
+    pub environment_impact: EnvironmentImpact,
     pub domain_of_interaction: DomainOfInteraction,
 }
 
@@ -62,7 +64,7 @@ pub enum DomainOfInteraction {
 }
 
 impl Annotation {
-    pub fn new(
+    pub(super) fn new(
         title: impl Into<String>,
         category: ToolCategory,
         environment_impact: EnvironmentImpact,
@@ -73,11 +75,6 @@ impl Annotation {
             environment_impact,
             domain_of_interaction: DomainOfInteraction::LocalOnly, // Default for all our tools
         }
-    }
-
-    pub const fn with_domain(mut self, domain: DomainOfInteraction) -> Self {
-        self.domain_of_interaction = domain;
-        self
     }
 }
 
@@ -99,12 +96,12 @@ impl From<Annotation> for ToolAnnotations {
             DomainOfInteraction::LocalOnly => Some(false),
         };
 
-        Self {
-            title:            Some(brp.title),
-            read_only_hint:   read_only,
-            destructive_hint: destructive,
-            idempotent_hint:  idempotent,
-            open_world_hint:  open_world,
-        }
+        Self::from_raw(
+            Some(brp.title),
+            read_only,
+            destructive,
+            idempotent,
+            open_world,
+        )
     }
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy_brp_mcp_macros::ParamStruct;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -8,41 +10,69 @@ use super::support::LaunchParams;
 use super::support::ToLaunchParams;
 use crate::brp_tools::Port;
 
+/// Search order for target resolution: "app" searches apps first (default), "example" searches
+/// examples first
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchOrder {
+    /// Search apps first, then examples
+    #[default]
+    App,
+    /// Search examples first, then apps
+    Example,
+}
+
 /// Shared parameters for launching Bevy binaries (apps or examples)
 #[derive(Clone, Deserialize, Serialize, JsonSchema, ParamStruct)]
 pub struct LaunchBevyBinaryParams {
     /// Name of the Bevy target to launch (app or example)
-    pub target_name:    String,
+    pub target_name: String,
     /// Build profile to use (debug or release)
     #[to_metadata(skip_if_none)]
-    pub profile:        Option<String>,
-    /// Path to use when multiple targets with the same name exist
+    pub profile: Option<String>,
+    /// Optional OS-level path to use as the search root. Overrides the default MCP workspace
+    /// roots.
+    #[serde(default)]
     #[to_metadata(skip_if_none)]
-    pub path:           Option<String>,
+    pub path: Option<String>,
+    /// Package name to filter when multiple targets with the same name exist
+    #[serde(default)]
+    #[to_metadata(skip_if_none)]
+    pub package_name: Option<String>,
     /// The BRP port (default: 15702)
     #[serde(default)]
-    pub port:           Port,
+    pub port: Port,
     /// Number of instances to launch (default: 1)
     #[serde(default)]
     pub instance_count: InstanceCount,
-    /// Cargo features to enable when building and running
+    /// Optional environment variables to set on the launched process
     #[serde(default)]
     #[to_metadata(skip_if_none)]
-    pub features:       Option<Vec<String>>,
+    pub env: Option<HashMap<String, String>>,
+    /// Search order: "app" searches apps first (default), "example" searches examples first
+    #[serde(default)]
+    pub search_order: SearchOrder,
+    /// Optional command-line arguments to pass to the launched process
+    #[serde(default)]
+    #[to_metadata(skip_if_none)]
+    pub args: Option<Vec<String>>,
 }
 
 impl ToLaunchParams for LaunchBevyBinaryParams {
     fn to_launch_params(&self, default_profile: &str) -> LaunchParams {
         LaunchParams {
-            target_name:    self.target_name.clone(),
-            profile:        self
+            target_name: self.target_name.clone(),
+            profile: self
                 .profile
                 .clone()
                 .unwrap_or_else(|| default_profile.to_string()),
-            path:           self.path.clone(),
-            port:           self.port,
+            path: self.path.clone(),
+            package_name: self.package_name.clone(),
+            port: self.port,
             instance_count: self.instance_count,
-            features:       self.features.clone(),
+            env: self.env.clone(),
+            search_order: self.search_order.clone(),
+            args: self.args.clone(),
         }
     }
 }

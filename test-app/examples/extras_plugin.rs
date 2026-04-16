@@ -16,8 +16,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use bevy::animation::AnimatedBy;
 use bevy::animation::AnimationPlayer;
-use bevy::animation::AnimationTarget;
+use bevy::animation::AnimationTargetId;
 use bevy::animation::graph::AnimationGraph;
 use bevy::animation::graph::AnimationGraphHandle;
 use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
@@ -43,6 +44,7 @@ use bevy::gizmos::light::ShowLightGizmo;
 use bevy::gizmos::retained::Gizmo;
 use bevy::input::gamepad::Gamepad;
 use bevy::input::gamepad::GamepadSettings;
+use bevy::input::keyboard::Key;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
@@ -109,31 +111,45 @@ use bevy::ui::widget::Label;
 use bevy::window::CursorIcon;
 use bevy::window::PrimaryWindow;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 
 /// Resource to track keyboard input history
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Reflect)]
+#[reflect(Resource)]
 struct KeyboardInputHistory {
     /// Currently pressed keys
-    active_keys:          Vec<String>,
+    active_keys: Vec<String>,
     /// Last pressed keys (for display after release)
-    last_keys:            Vec<String>,
+    last_keys: Vec<String>,
     /// Active modifier keys
-    modifiers:            Vec<String>,
+    modifiers: Vec<String>,
     /// Complete key combination (all keys that were pressed together)
     complete_combination: Vec<String>,
     /// Complete modifiers from the last combination
-    complete_modifiers:   Vec<String>,
+    complete_modifiers: Vec<String>,
     /// Time when the last key was pressed
-    press_time:           Option<Instant>,
+    #[reflect(ignore)]
+    press_time: Option<Instant>,
     /// Duration between press and release in milliseconds
-    last_duration_ms:     Option<u64>,
+    last_duration_ms: Option<u64>,
     /// Whether the last key press has completed
-    completed:            bool,
+    completed: bool,
 }
 
 /// Marker component for the keyboard input display text
 #[derive(Component)]
 struct KeyboardDisplayText;
+
+/// Marker component for the text input display
+#[derive(Component)]
+struct TextInputDisplay;
+
+/// Resource to store accumulated text input content, queryable via BRP
+#[derive(Resource, Default, Reflect)]
+#[reflect(Resource)]
+struct TextInputContent {
+    pub text: String,
+}
 
 /// Test resource for BRP operations
 #[derive(Resource, Default, Reflect)]
@@ -141,7 +157,7 @@ struct KeyboardDisplayText;
 struct TestConfigResource {
     pub setting_a: f32,
     pub setting_b: String,
-    pub enabled:   bool,
+    pub enabled: bool,
 }
 
 /// Test resource for runtime statistics
@@ -149,8 +165,8 @@ struct TestConfigResource {
 #[reflect(Resource)]
 struct RuntimeStatsResource {
     pub frame_count: u32,
-    pub total_time:  f32,
-    pub debug_mode:  bool,
+    pub total_time: f32,
+    pub debug_mode: bool,
 }
 
 /// Simple `HashSet` test component with just strings
@@ -165,9 +181,9 @@ struct SimpleSetComponent {
 #[reflect(Component)]
 struct TestMapComponent {
     /// String to String map
-    pub strings:    HashMap<String, String>,
+    pub strings: HashMap<String, String>,
     /// String to f32 map
-    pub values:     HashMap<String, f32>,
+    pub values: HashMap<String, f32>,
     /// String to Transform map (complex nested type)
     pub transforms: HashMap<String, Transform>,
 }
@@ -193,8 +209,8 @@ enum SimpleTestEnum {
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
 struct TestStructNoSerDe {
-    pub value:   f32,
-    pub name:    String,
+    pub value: f32,
+    pub name: String,
     pub enabled: bool,
 }
 
@@ -263,9 +279,9 @@ enum TestVariantChainEnum {
 #[derive(Default, Reflect)]
 struct MiddleStruct {
     /// Regular field with no special requirements
-    some_field:  String,
+    some_field: String,
     /// Another regular field
-    some_value:  f32,
+    some_value: f32,
     /// Nested enum that will require variant selection
     nested_enum: BottomEnum,
 }
@@ -276,7 +292,7 @@ enum BottomEnum {
     VariantA(u32),
     VariantB {
         value: f32,
-        name:  String,
+        name: String,
     },
     #[default]
     VariantC,
@@ -305,7 +321,7 @@ struct TestArrayField {
     /// Fixed-size array field
     pub vertices: [Vec2; 3],
     /// Another array field
-    pub values:   [f32; 4],
+    pub values: [f32; 4],
 }
 
 /// Test component with array of Transforms
@@ -321,7 +337,7 @@ struct TestArrayTransforms {
 #[reflect(Component)]
 struct TestTupleField {
     /// Tuple field with two elements
-    pub coords:    (f32, f32),
+    pub coords: (f32, f32),
     /// Tuple field with three elements
     pub color_rgb: (u8, u8, u8),
 }
@@ -338,7 +354,7 @@ struct TestComplexTuple {
     /// Tuple with complex types that should recurse
     pub complex_tuple: (Transform, Vec3),
     /// Nested tuple with both simple and complex types
-    pub nested_tuple:  (Vec2, (f32, String)),
+    pub nested_tuple: (Vec2, (f32, String)),
 }
 
 /// Core type with mixed mutability for `mutability_reason` testing
@@ -389,7 +405,7 @@ enum TestMixedMutabilityEnum {
     WithMixed(TestMixedMutabilityCore),
     /// Variant with multiple fields including mixed
     Multiple {
-        name:  String,
+        name: String,
         mixed: TestMixedMutabilityCore,
         value: f32,
     },
@@ -409,7 +425,7 @@ impl Default for TestComplexTuple {
     fn default() -> Self {
         Self {
             complex_tuple: (Transform::default(), Vec3::ZERO),
-            nested_tuple:  (Vec2::ZERO, (0.0, String::new())),
+            nested_tuple: (Vec2::ZERO, (0.0, String::new())),
         }
     }
 }
@@ -419,13 +435,13 @@ impl Default for TestComplexTuple {
 #[reflect(Component)]
 struct TestComplexComponent {
     /// Nested struct field (will have .transform.translation.x paths)
-    pub transform:      Transform,
+    pub transform: Transform,
     /// Enum field
-    pub mode:           SimpleNestedEnum,
+    pub mode: SimpleNestedEnum,
     /// Array field
-    pub points:         [Vec3; 2],
+    pub points: [Vec3; 2],
     /// Tuple field
-    pub range:          (f32, f32),
+    pub range: (f32, f32),
     /// Option field
     pub optional_value: Option<f32>,
 }
@@ -437,7 +453,7 @@ struct TestCollectionComponent {
     /// Vec<Transform> - should trigger `ListMutationBuilder` with complex recursion
     pub transform_list: Vec<Transform>,
     /// `HashSet`<String> - should trigger `SetMutationBuilder`
-    pub struct_set:     HashSet<String>,
+    pub struct_set: HashSet<String>,
 }
 
 impl Default for TestCollectionComponent {
@@ -459,7 +475,7 @@ impl Default for TestCollectionComponent {
 }
 
 fn main() {
-    let brp_plugin = BrpExtrasPlugin::new();
+    let brp_plugin = BrpExtrasPlugin::new().port_in_title(PortDisplay::Always);
     let (port, _) = brp_plugin.get_effective_port();
 
     info!("Starting BRP Extras Test on port {}", port);
@@ -467,7 +483,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
             primary_window: Some(bevy::window::Window {
-                title: format!("BRP Extras Test - Port {port}"),
+                title: "BRP Extras Test".to_string(),
                 resolution: (800, 600).into(),
                 focused: false,
                 position: bevy::window::WindowPosition::Centered(
@@ -480,33 +496,34 @@ fn main() {
         .add_plugins(brp_plugin)
         .add_plugins(MeshPickingPlugin)
         .init_resource::<KeyboardInputHistory>()
+        .init_resource::<TextInputContent>()
         .init_resource::<GlobalsUniform>()
         .insert_resource(CurrentPort(port))
         .insert_resource(WireframeConfig {
-            global:        true,
+            global: true,
             default_color: Color::WHITE,
         })
         .insert_resource(Wireframe2dConfig {
-            global:        true,
+            global: true,
             default_color: Color::WHITE,
         })
         .insert_resource(TestConfigResource {
             setting_a: 100.0,
             setting_b: "test config".to_string(),
-            enabled:   true,
+            enabled: true,
         })
         .insert_resource(RuntimeStatsResource {
             frame_count: 0,
-            total_time:  0.0,
-            debug_mode:  false,
+            total_time: 0.0,
+            debug_mode: false,
         })
         .insert_resource(MeshPickingSettings {
-            require_markers:     false,
+            require_markers: false,
             ray_cast_visibility: RayCastVisibility::VisibleInView,
         })
         .insert_resource(SpritePickingSettings {
             require_markers: false,
-            picking_mode:    SpritePickingMode::AlphaThreshold(0.1),
+            picking_mode: SpritePickingMode::AlphaThreshold(0.1),
         })
         .insert_resource(InputFocus::default())
         .add_systems(
@@ -514,7 +531,14 @@ fn main() {
             (setup_test_entities, setup_ui, minimize_window_on_start),
         )
         .add_systems(PostStartup, (setup_skybox_test, setup_scene_test))
-        .add_systems(Update, (track_keyboard_input, update_keyboard_display))
+        .add_systems(
+            Update,
+            (
+                track_keyboard_input,
+                update_keyboard_display,
+                handle_text_input,
+            ),
+        )
         .run();
 }
 
@@ -523,6 +547,14 @@ fn main() {
 struct CurrentPort(u16);
 
 /// Minimize the window immediately on startup
+/// On Linux/Wayland, minimizing causes a swap chain timeout panic because the
+/// compositor stops providing frames. Skip minimization on Linux.
+#[cfg(target_os = "linux")]
+fn minimize_window_on_start(windows: Query<&mut Window, With<PrimaryWindow>>) {
+    let _ = windows.iter().count();
+}
+
+#[cfg(not(target_os = "linux"))]
 fn minimize_window_on_start(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
     for mut window in &mut windows {
         window.set_minimized(true);
@@ -542,8 +574,8 @@ fn setup_skybox_test(mut commands: Commands, mut images: ResMut<Assets<Image>>) 
 
     let mut image = Image::new_fill(
         bevy::render::render_resource::Extent3d {
-            width:                 size,
-            height:                size * 6, // Stack 6 faces vertically
+            width: size,
+            height: size * 6, // Stack 6 faces vertically
             depth_or_array_layers: 1,
         },
         bevy::render::render_resource::TextureDimension::D2,
@@ -553,7 +585,10 @@ fn setup_skybox_test(mut commands: Commands, mut images: ResMut<Assets<Image>>) 
     );
 
     // Reinterpret as cube texture (height/width = 6)
-    image.reinterpret_stacked_2d_as_array(image.height() / image.width());
+    #[allow(clippy::expect_used)]
+    image
+        .reinterpret_stacked_2d_as_array(image.height() / image.width())
+        .expect("Failed to reinterpret image as cube texture array");
     image.texture_view_descriptor = Some(TextureViewDescriptor {
         dimension: Some(TextureViewDimension::Cube),
         ..default()
@@ -564,9 +599,9 @@ fn setup_skybox_test(mut commands: Commands, mut images: ResMut<Assets<Image>>) 
     // Spawn an entity with Skybox for testing mutations
     commands.spawn((
         Skybox {
-            image:      image_handle,
+            image: image_handle,
             brightness: 1000.0,
-            rotation:   Quat::IDENTITY,
+            rotation: Quat::IDENTITY,
         },
         Name::new("SkyboxTestEntity"),
     ));
@@ -636,8 +671,8 @@ fn spawn_transform_entities(commands: &mut Commands) {
     commands.spawn((
         Transform {
             translation: Vec3::new(10.0, 20.0, 30.0),
-            rotation:    Quat::from_rotation_y(std::f32::consts::PI / 4.0),
-            scale:       Vec3::new(0.5, 1.5, 2.0),
+            rotation: Quat::from_rotation_y(std::f32::consts::PI / 4.0),
+            scale: Vec3::new(0.5, 1.5, 2.0),
         },
         Name::new("ComplexTransformEntity"),
     ));
@@ -649,8 +684,8 @@ fn spawn_transform_entities(commands: &mut Commands) {
         Visibility::default(),
         VisibilityRange {
             start_margin: 0.0..10.0,
-            end_margin:   90.0..100.0,
-            use_aabb:     false,
+            end_margin: 90.0..100.0,
+            use_aabb: false,
         },
     ));
 }
@@ -689,7 +724,10 @@ fn spawn_sprite_and_ui_components(commands: &mut Commands) {
 
     // Entity with BorderRadius for testing mutations
     commands.spawn((
-        BorderRadius::all(Val::Px(10.0)),
+        Node {
+            border_radius: BorderRadius::all(Val::Px(10.0)),
+            ..default()
+        },
         Name::new("BorderRadiusTestEntity"),
     ));
 
@@ -703,8 +741,8 @@ fn spawn_sprite_and_ui_components(commands: &mut Commands) {
     commands.spawn((
         bevy::ui::BorderGradient(vec![bevy::ui::Gradient::Linear(bevy::ui::LinearGradient {
             color_space: bevy::ui::InterpolationColorSpace::Srgba,
-            angle:       std::f32::consts::FRAC_PI_4,
-            stops:       vec![
+            angle: std::f32::consts::FRAC_PI_4,
+            stops: vec![
                 bevy::ui::gradients::ColorStop::percent(Color::srgb(1.0, 0.0, 0.0), 0.0),
                 bevy::ui::gradients::ColorStop::percent(Color::srgb(0.0, 0.0, 1.0), 100.0),
             ],
@@ -731,8 +769,8 @@ fn spawn_sprite_and_ui_components(commands: &mut Commands) {
         },
         bevy::ui::BackgroundGradient(vec![bevy::ui::Gradient::Linear(bevy::ui::LinearGradient {
             color_space: bevy::ui::InterpolationColorSpace::Srgba,
-            angle:       std::f32::consts::FRAC_PI_2,
-            stops:       vec![
+            angle: std::f32::consts::FRAC_PI_2,
+            stops: vec![
                 bevy::ui::gradients::ColorStop::percent(Color::srgb(0.0, 1.0, 0.0), 0.0),
                 bevy::ui::gradients::ColorStop::percent(Color::srgb(1.0, 0.0, 1.0), 100.0),
             ],
@@ -756,7 +794,7 @@ fn spawn_light_entities(commands: &mut Commands, asset_server: &AssetServer) {
         Name::new("PointLightTestEntity"),
         ShadowFilteringMethod::default(),
         PointLightTexture {
-            image:          asset_server.load("lightmaps/caustic_directional_texture.png"),
+            image: asset_server.load("lightmaps/caustic_directional_texture.png"),
             cubemap_layout: bevy::camera::primitives::CubemapLayout::CrossVertical,
         },
         ShowLightGizmo {
@@ -813,12 +851,12 @@ fn spawn_light_entities(commands: &mut Commands, asset_server: &AssetServer) {
     // Entity with DistanceFog for testing mutations
     commands.spawn((
         bevy::pbr::DistanceFog {
-            color:                      Color::srgba(0.35, 0.48, 0.66, 1.0),
-            directional_light_color:    Color::srgba(1.0, 0.95, 0.85, 0.5),
+            color: Color::srgba(0.35, 0.48, 0.66, 1.0),
+            directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.5),
             directional_light_exponent: 8.0,
-            falloff:                    bevy::pbr::FogFalloff::Linear {
+            falloff: bevy::pbr::FogFalloff::Linear {
                 start: 5.0,
-                end:   20.0,
+                end: 20.0,
             },
         },
         Name::new("DistanceFogTestEntity"),
@@ -845,8 +883,8 @@ fn spawn_shadow_test_entities(commands: &mut Commands, asset_server: &AssetServe
         MeshMaterial3d::<StandardMaterial>(Handle::default()), // Dummy material handle
         Transform::from_xyz(0.0, 0.0, 0.0),
         Lightmap {
-            image:            asset_server.load("lightmaps/caustic_directional_texture.png"),
-            uv_rect:          bevy::math::Rect::new(0.0, 0.0, 1.0, 1.0),
+            image: asset_server.load("lightmaps/caustic_directional_texture.png"),
+            uv_rect: bevy::math::Rect::new(0.0, 0.0, 1.0, 1.0),
             bicubic_sampling: true,
         },
         Name::new("LightmapTestEntity"),
@@ -888,7 +926,7 @@ fn spawn_array_and_tuple_test_entities(commands: &mut Commands) {
                 Vec2::new(1.0, 0.0),
                 Vec2::new(0.5, 1.0),
             ],
-            values:   [1.0, 2.0, 3.0, 4.0],
+            values: [1.0, 2.0, 3.0, 4.0],
         },
         Name::new("TestArrayFieldEntity"),
     ));
@@ -905,7 +943,7 @@ fn spawn_array_and_tuple_test_entities(commands: &mut Commands) {
 
     commands.spawn((
         TestTupleField {
-            coords:    (10.0, 20.0),
+            coords: (10.0, 20.0),
             color_rgb: (255, 128, 64),
         },
         Name::new("TestTupleFieldEntity"),
@@ -922,7 +960,7 @@ fn spawn_array_and_tuple_test_entities(commands: &mut Commands) {
                 Transform::from_xyz(10.0, 20.0, 30.0),
                 Vec3::new(1.0, 2.0, 3.0),
             ),
-            nested_tuple:  (Vec2::new(5.0, 10.0), (3.0, "nested".to_string())),
+            nested_tuple: (Vec2::new(5.0, 10.0), (3.0, "nested".to_string())),
         },
         Name::new("TestComplexTupleEntity"),
     ));
@@ -1000,10 +1038,10 @@ fn spawn_enum_test_entities(commands: &mut Commands) {
 
     commands.spawn((
         TestComplexComponent {
-            transform:      Transform::from_xyz(5.0, 10.0, 15.0),
-            mode:           SimpleNestedEnum::WithVec2(Vec2::new(10.0, 20.0)),
-            points:         [Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)],
-            range:          (0.0, 100.0),
+            transform: Transform::from_xyz(5.0, 10.0, 15.0),
+            mode: SimpleNestedEnum::WithVec2(Vec2::new(10.0, 20.0)),
+            points: [Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)],
+            range: (0.0, 100.0),
             optional_value: Some(50.0),
         },
         Name::new("TestComplexEntity"),
@@ -1012,8 +1050,8 @@ fn spawn_enum_test_entities(commands: &mut Commands) {
     commands.spawn((
         TestVariantChainEnum::WithMiddleStruct {
             middle_struct: MiddleStruct {
-                some_field:  "test_field".to_string(),
-                some_value:  42.5,
+                some_field: "test_field".to_string(),
+                some_value: 42.5,
                 nested_enum: BottomEnum::VariantA(999),
             },
         },
@@ -1047,7 +1085,7 @@ fn spawn_enum_test_entities(commands: &mut Commands) {
     commands.spawn((
         SimpleNestedEnum::WithStruct {
             position: Vec3::new(1.0, 2.0, 3.0),
-            scale:    2.5,
+            scale: 2.5,
         },
         Name::new("SimpleNestedEnumStructEntity"),
     ));
@@ -1078,8 +1116,8 @@ fn spawn_enum_test_entities(commands: &mut Commands) {
 fn spawn_gltf_test_entities(commands: &mut Commands) {
     commands.spawn((
         TestStructNoSerDe {
-            value:   123.45,
-            name:    "test_struct".to_string(),
+            value: 123.45,
+            name: "test_struct".to_string(),
             enabled: true,
         },
         Name::new("TestStructNoSerDeEntity"),
@@ -1130,11 +1168,11 @@ fn spawn_gltf_test_entities(commands: &mut Commands) {
 
 fn spawn_mixed_mutability_test_entities(commands: &mut Commands) {
     let create_mixed_core = |suffix: &str| TestMixedMutabilityCore {
-        mutable_string:           format!("test_string_{suffix}"),
-        mutable_float:            42.5,
-        not_mutable_arc:          Arc::new(format!("arc_string_{suffix}")),
+        mutable_string: format!("test_string_{suffix}"),
+        mutable_float: 42.5,
+        not_mutable_arc: Arc::new(format!("arc_string_{suffix}")),
         partially_mutable_nested: TestPartiallyMutableNested {
-            nested_mutable_value:   100.0,
+            nested_mutable_value: 100.0,
             nested_not_mutable_arc: Arc::new(vec![1, 2, 3, 4, 5]),
         },
     };
@@ -1164,7 +1202,7 @@ fn spawn_mixed_mutability_test_entities(commands: &mut Commands) {
 
     commands.spawn((
         TestMixedMutabilityEnum::Multiple {
-            name:  "enum_multiple".to_string(),
+            name: "enum_multiple".to_string(),
             mixed: create_mixed_core("enum"),
             value: 123.45,
         },
@@ -1185,13 +1223,13 @@ fn spawn_retained_gizmo_entities(
     // Spawn entity with Gizmo component
     commands.spawn((
         Gizmo {
-            handle:      gizmo_handle,
+            handle: gizmo_handle,
             line_config: GizmoLineConfig {
                 width: 2.0,
                 perspective: true,
                 ..default()
             },
-            depth_bias:  0.0,
+            depth_bias: 0.0,
         },
         Name::new("RetainedGizmoTestEntity"),
     ));
@@ -1214,12 +1252,10 @@ fn spawn_animation_and_audio_entities(
         Name::new("AnimationGraphHandleAndPlayerAndTransitionsTestEntity"),
     ));
 
-    // Entity with AnimationTarget for testing mutations
+    // Entity with AnimationTargetId and AnimatedBy for testing mutations
     commands.spawn((
-        AnimationTarget {
-            id:     bevy::animation::AnimationTargetId::from_name(&Name::new("test_target")),
-            player: Entity::PLACEHOLDER,
-        },
+        AnimationTargetId::from_name(&Name::new("test_target")),
+        AnimatedBy(Entity::PLACEHOLDER),
         Name::new("AnimationTargetTestEntity"),
     ));
 
@@ -1316,10 +1352,7 @@ fn spawn_render_entities(commands: &mut Commands) {
 
     // Entity with ClusteredDecal for testing mutations
     commands.spawn((
-        ClusteredDecal {
-            image: Handle::default(),
-            tag:   1,
-        },
+        ClusteredDecal::default(),
         Name::new("ClusteredDecalTestEntity"),
     ));
 
@@ -1342,9 +1375,9 @@ fn spawn_render_entities(commands: &mut Commands) {
     // Uses the same skybox image handle we created earlier
     commands.spawn((
         GeneratedEnvironmentMapLight {
-            environment_map:                  Handle::default(), // Dummy handle for testing
-            intensity:                        1000.0,
-            rotation:                         Quat::IDENTITY,
+            environment_map: Handle::default(), // Dummy handle for testing
+            intensity: 1000.0,
+            rotation: Quat::IDENTITY,
             affects_lightmapped_mesh_diffuse: true,
         },
         Name::new("GeneratedEnvironmentMapLightTestEntity"),
@@ -1502,6 +1535,7 @@ fn spawn_text_container(parent: &mut RelatedSpawnerCommands<ChildOf>, port: &Res
             spawn_keyboard_display_text(parent, port);
             spawn_button_test(parent);
             spawn_label_test(parent);
+            spawn_text_input_section(parent);
         });
 }
 
@@ -1609,6 +1643,63 @@ fn spawn_label_test(parent: &mut RelatedSpawnerCommands<ChildOf>) {
         ),
         Name::new("BoxShadowTestEntity"),
     ));
+}
+
+fn spawn_text_input_section(parent: &mut RelatedSpawnerCommands<ChildOf>) {
+    parent.spawn((
+        Text::new(""),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        bevy::text::TextBackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+        bevy::text::TextBounds {
+            width: Some(400.0),
+            height: Some(100.0),
+        },
+        Outline::new(Val::Px(1.0), Val::Px(0.0), Color::srgb(0.5, 0.5, 0.5)),
+        TextInputDisplay,
+        Name::new("TextInputTestEntity"),
+    ));
+}
+
+/// Handle keyboard input for the text input field
+fn handle_text_input(
+    mut events: MessageReader<KeyboardInput>,
+    mut content: ResMut<TextInputContent>,
+    mut display: Query<&mut Text, With<TextInputDisplay>>,
+) {
+    for event in events.read() {
+        if !event.state.is_pressed() {
+            continue;
+        }
+
+        match (&event.logical_key, &event.text) {
+            (Key::Backspace, _) => {
+                content.text.pop();
+            },
+            (_, Some(inserted_text)) => {
+                if inserted_text.chars().all(is_printable_char) {
+                    content.text.push_str(inserted_text);
+                }
+            },
+            _ => {},
+        }
+    }
+
+    for mut text in &mut display {
+        (**text).clone_from(&content.text);
+    }
+}
+
+/// Filter out non-printable characters (from egui-winit)
+fn is_printable_char(chr: char) -> bool {
+    let is_in_private_use_area = ('\u{e000}'..='\u{f8ff}').contains(&chr)
+        || ('\u{f0000}'..='\u{ffffd}').contains(&chr)
+        || ('\u{100000}'..='\u{10fffd}').contains(&chr);
+
+    !is_in_private_use_area && !chr.is_ascii_control()
 }
 
 /// Track keyboard input events

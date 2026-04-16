@@ -1,9 +1,18 @@
 mod enum_path_builder;
-mod option_classification;
 mod variant_kind;
-mod variant_signature;
 
-pub use enum_path_builder::process_enum;
-pub use enum_path_builder::select_preferred_example;
-pub use option_classification::OptionClassification;
-pub use variant_signature::VariantSignature;
+use super::BuilderError;
+use super::mutation_path_internal::MutationPathInternal;
+use super::recursion_context::RecursionContext;
+use super::types_internal::Example;
+use super::types_internal::ExampleGroup;
+
+pub(super) fn process_enum(
+    ctx: &RecursionContext,
+) -> std::result::Result<Vec<MutationPathInternal>, BuilderError> {
+    enum_path_builder::process_enum(ctx)
+}
+
+pub(super) fn select_preferred_example(examples: &[ExampleGroup]) -> Option<Example> {
+    enum_path_builder::select_preferred_example(examples)
+}

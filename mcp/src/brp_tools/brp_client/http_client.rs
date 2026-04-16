@@ -17,20 +17,20 @@ use super::json_rpc_builder::BrpJsonRpcBuilder;
 use crate::brp_tools::Port;
 use crate::error::Error;
 use crate::error::Result;
-use crate::json_object::JsonObjectAccess;
+use crate::support::JsonObjectAccess;
 use crate::tool::BrpMethod;
 use crate::tool::ParameterName;
 
 /// HTTP client for BRP communication
-pub struct BrpHttpClient {
+pub(super) struct BrpHttpClient {
     method: BrpMethod,
-    port:   Port,
+    port: Port,
     params: Option<Value>,
 }
 
 impl BrpHttpClient {
     /// Create a new BRP HTTP client
-    pub const fn new(method: BrpMethod, port: Port, params: Option<Value>) -> Self {
+    pub(super) const fn new(method: BrpMethod, port: Port, params: Option<Value>) -> Self {
         Self {
             method,
             port,
@@ -62,7 +62,7 @@ impl BrpHttpClient {
     }
 
     /// Send an HTTP request with timeout
-    pub async fn send_request(&self) -> Result<reqwest::Response> {
+    pub(super) async fn send_request(&self) -> Result<reqwest::Response> {
         let url = self.build_url();
         let body = self.build_request_body();
         let client = reqwest::Client::new();
@@ -86,7 +86,7 @@ impl BrpHttpClient {
     }
 
     /// Send an HTTP request for streaming (no timeout)
-    pub async fn send_streaming_request(&self) -> Result<reqwest::Response> {
+    pub(super) async fn send_streaming_request(&self) -> Result<reqwest::Response> {
         let url = self.build_url();
         let body = self.build_request_body();
         // Create client with no timeout for streaming
@@ -164,8 +164,16 @@ impl BrpHttpClient {
                 temp_dir,
                 std::process::id()
             );
-            let _ = std::fs::write(&error_file, &error_details);
-            debug!("HTTP error details written to: {}", error_file);
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&error_file)
+            {
+                use std::io::Write;
+
+                let _ = writeln!(file, "{error_details}");
+                debug!("HTTP error details appended to: {}", error_file);
+            }
         }
 
         // Extract additional context from the request body for better error reporting

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rmcp::ErrorData;
-use rmcp::model::CallToolRequestParam;
+use rmcp::model::CallToolRequestParams;
 use rmcp::model::CallToolResult;
 use schemars::generate::SchemaSettings;
 
@@ -19,21 +19,23 @@ use super::types::ErasedToolFn;
 #[derive(Clone)]
 pub struct ToolDef {
     /// Tool name and description
-    pub tool_name:   ToolName,
+    pub tool_name: ToolName,
     /// Tool annotations
     pub annotations: Annotation,
     /// Handler function
-    pub handler:     Arc<dyn ErasedToolFn>,
+    pub handler: Arc<dyn ErasedToolFn>,
     /// Function to build parameters for MCP registration
-    pub parameters:  Option<fn() -> ParameterBuilder>,
+    pub parameters: Option<fn() -> ParameterBuilder>,
 }
 
 impl ToolDef {
-    pub fn name(&self) -> &'static str { self.tool_name.into() }
+    pub fn name(&self) -> &'static str {
+        self.tool_name.into()
+    }
 
     pub async fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         roots: Vec<PathBuf>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         // Create HandlerContext - all tools use the same context
@@ -84,15 +86,13 @@ impl ToolDef {
             enhanced
         };
 
-        rmcp::model::Tool {
-            name:          <&'static str>::from(self.tool_name).into(),
-            title:         Some(self.tool_name.short_title()),
-            description:   Some(self.tool_name.description().into()),
-            input_schema:  builder.build(),
-            output_schema: Some(Self::generate_output_schema()),
-            annotations:   Some(enhanced_annotations.into()),
-            icons:         None,
-            meta:          None,
-        }
+        rmcp::model::Tool::new(
+            <&'static str>::from(self.tool_name),
+            self.tool_name.description(),
+            builder.build(),
+        )
+        .with_title(self.tool_name.short_title())
+        .with_raw_output_schema(Self::generate_output_schema())
+        .with_annotations(enhanced_annotations.into())
     }
 }

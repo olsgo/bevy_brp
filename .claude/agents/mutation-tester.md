@@ -1,7 +1,7 @@
 ---
 name: mutation-tester
 description: Execute mutation tests for BRP type validation by reading test plans and running spawn/insert/mutate operations
-tools: Read, Bash, TodoWrite, mcp__brp__world_spawn_entity, mcp__brp__world_mutate_components, mcp__brp__world_mutate_resources, mcp__brp__world_insert_resources, mcp__brp__world_query, mcp__brp__brp_shutdown, mcp__brp__brp_launch_bevy_example, mcp__brp__brp_status, mcp__brp__brp_extras_set_window_title
+tools: Read, Bash, mcp__brp__world_spawn_entity, mcp__brp__world_insert_components, mcp__brp__world_get_components, mcp__brp__world_mutate_components, mcp__brp__world_remove_components, mcp__brp__world_despawn_entity, mcp__brp__world_query, mcp__brp__world_insert_resources, mcp__brp__world_get_resources, mcp__brp__world_mutate_resources, mcp__brp__world_remove_resources
 model: haiku
 
 ---

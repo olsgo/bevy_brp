@@ -78,7 +78,7 @@ Mark each todo as "in_progress" when beginning that step, and "completed" when t
 
     1. **Launch Example**:
     ```bash
-    mcp__brp__brp_launch_bevy_example(
+    mcp__brp__brp_launch(
         target_name="${APP_NAME}",
         port=${APP_PORT}
     )
@@ -120,13 +120,6 @@ Mark each todo as "in_progress" when beginning that step, and "completed" when t
     ```bash
     python3 .claude/scripts/create_mutation_test_json/compare.py .claude/transient/all_types_baseline.json ${TARGET_FILE}
     ```
-
-    The file contains the COMPLETE BRP response:
-    - spawn_format with examples
-    - mutation_paths with examples for each path
-    - supported_operations
-    - reflection_traits
-    - schema_info
 
     **Comparison Output**: The compare.py script displays:
     - Current file statistics (total types, spawn-supported types, types with mutations, total mutation paths)

@@ -5,10 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.17.3] - 2025-12-20
+## [0.18.7] - 2026-03-03
 
 ### Changed
-- Version bump to 0.17.3 to maintain workspace version synchronization
+- Version bump to 0.18.7 to maintain workspace version synchronization
+
+## [0.18.6] - 2026-02-25
+
+### Changed
+- Version bump to 0.18.6 to maintain workspace version synchronization
+
+## [0.18.5] - 2026-02-22
+
+### Changed
+- Version bump to 0.18.5 to maintain workspace version synchronization
+
+## [0.18.4] - 2026-02-20
+
+### Changed
+- Version bump to 0.18.4 to maintain workspace version synchronization
+
+## [0.18.3] - 2026-02-17
+
+### Changed
+- Version bump to 0.18.3 to maintain workspace version synchronization
+
+## [0.18.2] - 2026-02-17
+
+### Changed
+- Version bump to 0.18.2 to maintain workspace version synchronization
+
+## [0.18.1] - 2026-02-10
+
+## [0.18.0] - 2026-01-15
+
+### Changed
+- Updated dependency to Bevy 0.18.0 stable release
+
+## [0.18.0-rc.1] - 2025-12-21
+
+### Changed
+- **Upgraded to Bevy 0.18.0-rc.1**: Updated bevy dependency from 0.17.x to 0.18.0-rc.1
 
 ## [0.17.2] - 2025-11-20
 

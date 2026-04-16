@@ -10,8 +10,9 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 
-use crate::brp_tools::constants::DEFAULT_BRP_EXTRAS_PORT;
-use crate::brp_tools::constants::VALID_PORT_RANGE;
+use super::constants::DEFAULT_BRP_EXTRAS_PORT;
+use super::constants::VALID_PORT_RANGE;
+use crate::support::deserialize_number_or_string;
 
 /// Port number for BRP - defaults to 15702
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema, Serialize)]
@@ -22,82 +23,35 @@ impl<'de> Deserialize<'de> for Port {
     where
         D: Deserializer<'de>,
     {
-        let port = deserialize_port(deserializer)?;
-        Ok(Self(port))
+        let port: u16 = deserialize_number_or_string(deserializer)?;
+        if VALID_PORT_RANGE.contains(&port) {
+            Ok(Self(port))
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "Invalid port {port}: must be in range {}-{}",
+                VALID_PORT_RANGE.start(),
+                VALID_PORT_RANGE.end()
+            )))
+        }
     }
 }
 
 impl Default for Port {
-    fn default() -> Self { Self(DEFAULT_BRP_EXTRAS_PORT) }
+    fn default() -> Self {
+        Self(DEFAULT_BRP_EXTRAS_PORT)
+    }
 }
 
 impl std::fmt::Display for Port {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 impl Deref for Port {
     type Target = u16;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
-
-/// Deserialize and validate port numbers
-///
-/// Ensures the port is within the valid range (1024-65534)
-/// Accepts both number and string inputs for compatibility
-pub fn deserialize_port<'de, D>(deserializer: D) -> Result<u16, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    use std::fmt;
-
-    use serde::de::Visitor;
-    use serde::de::{self};
-
-    struct PortVisitor;
-
-    impl Visitor<'_> for PortVisitor {
-        type Value = u16;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a port number as u16 or string")
-        }
-
-        fn visit_u16<E>(self, value: u16) -> Result<u16, E>
-        where
-            E: de::Error,
-        {
-            Ok(value)
-        }
-
-        fn visit_u64<E>(self, value: u64) -> Result<u16, E>
-        where
-            E: de::Error,
-        {
-            u16::try_from(value)
-                .map_err(|_| E::custom(format!("port number {value} is out of u16 range")))
-        }
-
-        fn visit_str<E>(self, value: &str) -> Result<u16, E>
-        where
-            E: de::Error,
-        {
-            value
-                .parse::<u16>()
-                .map_err(|_| E::custom(format!("invalid port string: {value}")))
-        }
-    }
-
-    let port = deserializer.deserialize_any(PortVisitor)?;
-
-    if VALID_PORT_RANGE.contains(&port) {
-        Ok(port)
-    } else {
-        Err(serde::de::Error::custom(format!(
-            "Invalid port {}: must be in range {}-{}",
-            port,
-            VALID_PORT_RANGE.start(),
-            VALID_PORT_RANGE.end()
-        )))
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

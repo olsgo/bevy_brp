@@ -3,22 +3,24 @@ mod enum_builder;
 mod mutation_path_internal;
 mod new_types;
 mod not_mutable_reason;
+mod option_classification;
 mod path_builder;
 mod path_example;
 mod path_kind;
 mod recursion_context;
 mod support;
-mod type_kind_builders;
+mod type_kind_builder;
 mod type_parser;
-mod types;
+mod types_internal;
+mod types_response;
 
 // public use
 pub(super) use api::build_mutation_paths;
-pub(super) use api::extract_spawn_format;
-pub(super) use enum_builder::VariantSignature;
+pub(super) use api::extract_spawn_insert_example;
 use error_stack::Report;
 use not_mutable_reason::NotMutableReason;
-pub(super) use types::MutationPathExternal;
+pub(super) use types_response::MutationPathExternal;
+pub(super) use types_response::SpawnInsertExample;
 
 // local use
 use crate::error::Error;
@@ -35,15 +37,19 @@ use crate::error::Error;
 /// This design ensures that semantic information about why types cannot be mutated
 /// is preserved throughout the internal processing and properly communicated to users.
 #[derive(Debug)]
-pub(super) enum BuilderError {
+enum BuilderError {
     NotMutable(NotMutableReason),
     SystemError(Report<Error>),
 }
 
 impl From<Report<Error>> for BuilderError {
-    fn from(e: Report<Error>) -> Self { Self::SystemError(e) }
+    fn from(e: Report<Error>) -> Self {
+        Self::SystemError(e)
+    }
 }
 
 impl From<NotMutableReason> for BuilderError {
-    fn from(reason: NotMutableReason) -> Self { Self::NotMutable(reason) }
+    fn from(reason: NotMutableReason) -> Self {
+        Self::NotMutable(reason)
+    }
 }

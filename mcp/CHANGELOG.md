@@ -5,10 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.17.3] - 2025-12-20
+## [0.19.0] - 2026-03-22
+
+### Breaking Changes
+- **Removed** `brp_launch_bevy_app` and `brp_launch_bevy_example` in favor of unified `brp_launch` tool
+- The new `brp_launch` tool searches both apps and examples automatically, controlled by `search_order` parameter ("app" default, or "example")
+- Response includes `launched_as` field ("app" or "example") indicating how the target was resolved
+- Not-found errors now list all available targets (apps and examples) with names, kinds, and paths
+- **Removed** `brp_list_bevy_apps`, `brp_list_bevy_examples`, and `brp_list_brp_apps` in favor of unified `brp_list_bevy` tool
+- The new `brp_list_bevy` tool returns all Bevy targets (apps and examples) in a single response
+- Each item includes a `kind` field ("app" or "example") and `brp_level` field ("extras", "brp_only", or "none") replacing the old boolean `brp_enabled`
+- `brp_launch` parameter `path` renamed to `package_name` — matches the `package_name` field from `brp_list_bevy` (exact match). Old partial/suffix path matching removed.
+
+### Added
+- Add optional `path` parameter to `brp_list_bevy` for overriding the search root directory (defaults to MCP workspace roots / cwd)
+- Add optional `path` parameter to `brp_launch` for overriding the search root directory (defaults to MCP workspace roots / cwd)
+- Add optional `args` parameter to `brp_launch` for passing command-line arguments to the launched process. For apps, args are appended directly; for examples, args are passed after a `--` separator.
+
+### Changed
+- App launches use a lock-free freshness check before invoking Cargo. If the app binary appears up to date, it launches directly; if the binary is missing, stale, or freshness is inconclusive, it falls back to `cargo build`.
 
 ### Fixed
-- Fixed scalar mutation values being stringified instead of passed as JSON numbers. The `value` parameter in `world_mutate_components` and `world_mutate_resources` now correctly accepts all JSON types (numbers, booleans, strings, arrays, objects, null) instead of only objects. This was caused by `serde_json::Value` schemas having no `type` field, which was incorrectly mapped to `ParameterType::Object`.
+- Fix port and instance_count parameters to accept both numbers and strings from MCP clients
+
+## [0.18.7] - 2026-03-03
+
+### Added
+- Add environment variable passthrough for launched Bevy processes via optional `env` parameter
+
+### Changed
+- Update `rmcp` dependency from 0.16.0 to 0.17.0
+
+## [0.18.6] - 2026-02-25
+
+### Fixed
+- Fix JSON schema output to use `anyOf` with `items` on array branches for Copilot compatibility. Thanks [darkautism](https://github.com/darkautism)!
+- Fix `brp_status` failing to detect running processes on macOS when the process name exceeds 16 characters (macOS kernel truncation). Now falls back to checking the full binary path from command arguments.
+
+## [0.18.5] - 2026-02-22
+
+### Fixed
+- `list_bevy_apps`, `list_bevy_examples`, and `list_brp_apps` now work in clients that don't provide file roots (e.g., OpenAI Codex). Previously, workspace discovery failed silently when the client returned empty roots; it now falls back to the current working directory.
+
+## [0.18.4] - 2026-02-20
+
+### Added
+- **`brp_extras_get_diagnostics` tool**: New MCP tool for querying FPS and frame time diagnostics from a running Bevy app. Returns current, average, and smoothed FPS/frame time values, total frame count, and history buffer metadata via `brp_extras/get_diagnostics`.
+
+## [0.18.3] - 2026-02-17
+
+### Changed
+- Version bump to 0.18.3 to maintain workspace version synchronization
+
+## [0.18.2] - 2026-02-17
+
+### Added
+- **Mouse input tools**: Nine new MCP tools for mouse control via `bevy_brp_extras`
+  - `brp_extras_click_mouse` - Click mouse button (Left, Right, Middle, Back, Forward)
+  - `brp_extras_double_click_mouse` - Double click with configurable delay
+  - `brp_extras_send_mouse_button` - Press and hold mouse button for duration
+  - `brp_extras_move_mouse` - Move cursor (delta or absolute positioning)
+  - `brp_extras_drag_mouse` - Drag with smooth interpolated movement
+  - `brp_extras_scroll_mouse` - Scroll wheel (line/pixel, horizontal/vertical)
+  - `brp_extras_double_tap_gesture` - Trackpad double tap (macOS)
+  - `brp_extras_pinch_gesture` - Trackpad pinch-to-zoom (macOS)
+  - `brp_extras_rotation_gesture` - Trackpad rotation (macOS)
+
+### Fixed
+- `world_trigger_event` now correctly sends struct payloads as JSON objects instead of stringified JSON
+- Parameter handling for MCP clients that stringify JSON objects/arrays for `Any`-typed parameters (affects `world_insert_resources`, `world_mutate_resources`, `world_mutate_components`, `registry_schema`)
+- Gracefully fall back to current directory when MCP client doesn't support `roots/list` instead of returning a hard error. Thanks [kasbah](https://github.com/kasbah)!
+
+## [0.18.1] - 2026-02-10
+
+### Added
+- **`brp_extras_type_text` tool**: New MCP tool for typing text sequentially via `brp_extras/type_text` method. Returns number of characters queued and any skipped unmappable characters. Thanks [tobert](https://github.com/tobert)!
+
+## [0.18.0] - 2026-01-15
+
+### Changed
+- Updated dependency to Bevy 0.18.0 stable release
+
+## [0.18.0-rc.1] - 2025-12-21
+
+### Added
+
+- **`world_trigger_event` tool**: Trigger Bevy events remotely via the new `world.trigger_event` BRP method (Bevy 0.18+). Events must derive `Reflect` with `#[reflect(Event)]` to be triggerable. Example: "Trigger the SpawnEnemy event with enemy_type goblin at position 10, 0, 5"
+
+### Changed
+- **Upgraded to Bevy 0.18.0-rc.1**: Updated bevy dependency from 0.17.x to 0.18.0-rc.1
+- **BREAKING**: `brp_type_guide` and `brp_all_type_guides` responses now return `spawn_example` (for Components) or `resource_example` (for Resources) instead of `spawn_format`. Each example now includes an `agent_guidance` field alongside the `example` value.
 
 ## [0.17.2] - 2025-11-20
 
@@ -26,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Upgrading `rmcp` to 0.9.0 to support structured content responses via `CallToolResult::structured()` instead of text-wrapped JSON
     - Correcting JSON Schema generation for optional response fields (`metadata`, `result`, etc.) to properly signal optionality and use compatible schema definitions
     - **Note**: This changes the response structure returned to coding agents from `{tool_response: [{text: "..."}]}` to `{tool_response: [{...}]}` (structured data). While coding agents handle both formats transparently, custom code that inspects the raw agent response structure (e.g., hooks, testing infrastructure) may require updates. The actual response content remains identical.
+    - Thanks to [tobert](https://github.com/tobert) for identifying and fixing this issue!
 
 ## [0.17.0] - 2025-10-31
 

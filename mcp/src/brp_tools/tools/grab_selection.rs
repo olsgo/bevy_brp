@@ -12,44 +12,51 @@ use crate::tool::{HandlerContext, HandlerResult, ToolFn, ToolResult};
 const DEFAULT_SELECTION_PATH: &str = "target/ai-selection/selection.json";
 const ENV_SELECTION_PATH: &str = "BRP_GRAB_SELECTION_PATH";
 
-fn default_true() -> bool { true }
+const fn default_true() -> bool {
+    true
+}
 
-/// Parameters for the `grab.selection` tool
+/// Parameters for the `grab_selection` tool.
 #[derive(Clone, Deserialize, Serialize, JsonSchema, ParamStruct)]
 pub struct GrabSelectionParams {
-    /// Optional override path to the selection JSON (defaults to `target/ai-selection/selection.json` or `BRP_GRAB_SELECTION_PATH` env var)
+    /// Optional override path to the selection JSON.
+    ///
+    /// When omitted, the tool reads `BRP_GRAB_SELECTION_PATH` if it is set,
+    /// otherwise it falls back to `target/ai-selection/selection.json`.
     #[serde(default)]
     pub path: Option<String>,
 
-    /// If true, return an error when the selection file indicates `enabled: false`
+    /// Whether to fail if the selection file says capture is disabled.
     #[serde(default)]
     pub require_enabled: bool,
 
-    /// If true, missing file returns an error; if false, returns an empty selection result
+    /// Whether a missing selection file should be treated as an error.
     #[serde(default = "default_true")]
     pub fail_if_absent: bool,
 }
 
-/// Result for the `grab.selection` tool
+/// Result returned by the `grab_selection` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, ResultStruct)]
 pub struct GrabSelectionResult {
-    /// Path that was read
+    /// Path that was read.
     #[to_metadata]
-    pub path: String,
+    path: String,
 
-    /// Whether selection mode is enabled
+    /// Whether selection capture is enabled.
     #[to_metadata]
-    pub enabled: bool,
+    enabled: bool,
 
-    /// Parsed selection data (if any)
+    /// Parsed selection data, if the file contained one.
     #[to_result(skip_if_none)]
-    pub selection: Option<SelectionData>,
+    selection: Option<SelectionData>,
 
-    /// Message template for formatting responses
+    /// Message template for formatting responses.
     #[to_message(message_template = "Grab selection fetched from {path}")]
-    pub message_template: String,
+    message_template: String,
 }
 
+/// The selection payload stored by the app-side grab/selection writer.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SelectionData {
     pub entity: EntitySummary,
@@ -59,18 +66,24 @@ pub struct SelectionData {
     pub target: SelectionTargetSummary,
 }
 
+/// Summary of the selected entity.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EntitySummary {
     pub id: u32,
     pub name: Option<String>,
 }
 
+/// Cursor position captured alongside the selection, when available.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CursorSummary {
     pub x: f32,
     pub y: f32,
 }
 
+/// The selected target details, either UI or world-space.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SelectionTargetSummary {
@@ -85,6 +98,8 @@ pub enum SelectionTargetSummary {
     },
 }
 
+/// Rectangle bounds for a UI target.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RectSummary {
     pub min: [f32; 2],
@@ -92,6 +107,8 @@ pub struct RectSummary {
     pub z: f32,
 }
 
+/// World-space bounds for a selected mesh target.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BoundsSummary {
     pub min: [f32; 3],
@@ -100,8 +117,8 @@ pub struct BoundsSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 struct SelectionSummaryFile {
-    pub enabled: bool,
-    pub selection: Option<SelectionData>,
+    enabled: bool,
+    selection: Option<SelectionData>,
 }
 
 #[derive(ToolFn)]
@@ -114,21 +131,23 @@ async fn handle_impl(params: GrabSelectionParams) -> crate::error::Result<GrabSe
 
     if !path.exists() {
         if params.fail_if_absent {
-            return Err(Error::missing(&format!(
-                "grab selection file at {}",
-                path.display()
-            ))
-            .into());
+            return Err(
+                Error::missing(&format!("grab selection file at {}", path.display())).into(),
+            );
         }
 
-        return Ok(GrabSelectionResult::new(path.display().to_string(), false, None));
+        return Ok(GrabSelectionResult::new(
+            path.display().to_string(),
+            false,
+            None,
+        ));
     }
 
     let contents = fs::read_to_string(&path)
-        .map_err(|e| Error::io_failed("read grab selection file", &path, &e))?;
+        .map_err(|error| Error::io_failed("read grab selection file", &path, error))?;
 
     let summary: SelectionSummaryFile = serde_json::from_str(&contents)
-        .map_err(|e| Error::failed_to("parse grab selection", e))?;
+        .map_err(|error| Error::failed_to("parse grab selection", error))?;
 
     if params.require_enabled && !summary.enabled {
         return Err(Error::invalid("enabled", "selection capture is disabled").into());
@@ -142,14 +161,14 @@ async fn handle_impl(params: GrabSelectionParams) -> crate::error::Result<GrabSe
 }
 
 fn resolve_path(arg: Option<&str>) -> PathBuf {
-    if let Some(p) = arg {
-        return PathBuf::from(p);
+    if let Some(path) = arg {
+        return PathBuf::from(path);
     }
 
-    if let Ok(env_path) = env::var(ENV_SELECTION_PATH) {
-        if !env_path.is_empty() {
-            return PathBuf::from(env_path);
-        }
+    if let Ok(env_path) = env::var(ENV_SELECTION_PATH)
+        && !env_path.is_empty()
+    {
+        return PathBuf::from(env_path);
     }
 
     PathBuf::from(DEFAULT_SELECTION_PATH)
@@ -157,6 +176,13 @@ fn resolve_path(arg: Option<&str>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::float_cmp,
+        clippy::match_wildcard_for_single_variants,
+        clippy::panic,
+        clippy::unwrap_used
+    )]
+
     use super::*;
     use futures::executor::block_on;
     use tempfile::TempDir;
@@ -200,10 +226,10 @@ mod tests {
         .unwrap();
 
         assert!(result.enabled);
-        let sel = result.selection.unwrap();
-        assert_eq!(sel.entity.id, 1);
-        assert_eq!(sel.hierarchy, vec!["Root", "Button"]);
-        match sel.target {
+        let selection = result.selection.unwrap();
+        assert_eq!(selection.entity.id, 1);
+        assert_eq!(selection.hierarchy, vec!["Root", "Button"]);
+        match selection.target {
             SelectionTargetSummary::Ui { rect, text } => {
                 assert_eq!(rect.min, [0.0, 0.0]);
                 assert_eq!(rect.max, [100.0, 50.0]);
@@ -241,9 +267,13 @@ mod tests {
         .unwrap();
 
         assert!(!result.enabled);
-        let sel = result.selection.unwrap();
-        match sel.target {
-            SelectionTargetSummary::World { position, bounds, mesh } => {
+        let selection = result.selection.unwrap();
+        match selection.target {
+            SelectionTargetSummary::World {
+                position,
+                bounds,
+                mesh,
+            } => {
                 assert_eq!(position, [1.0, 2.0, 3.0]);
                 assert!(bounds.is_none());
                 assert_eq!(mesh.as_deref(), Some("mesh-123"));

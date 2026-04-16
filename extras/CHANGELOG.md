@@ -5,10 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.17.3] - 2025-12-20
+## [0.19.0] - 2026-03-22
+
+### Added
+- Add `port_in_title()` builder method to optionally append `(port: XXXXX)` to the primary window's title at startup. Accepts `PortDisplay::Always` (always show) or `PortDisplay::NonDefault` (only when the port differs from the default 15702). Not called by default — window title is unchanged unless opted in.
+- Add `with_http_plugin()` constructor for providing a fully configured `RemoteHttpPlugin`.
+- Add `HasEffectivePort` trait enabling `get_effective_port()` on both `Unconfigured` and `PortConfigured` plugin states, returning the correct resolved port for each.
+
+### Fixed
+- Fix `BrpExtrasPlugin` panicking when `RemotePlugin` or `RemoteHttpPlugin` is already added by another plugin. `RemotePlugin` and `RemoteHttpPlugin` are now conditionally added only if not already present, and extras methods are registered directly into the existing `RemoteMethods` resource. If `RemoteHttpPlugin` is already present, port configuration (`with_port()` / `BRP_EXTRAS_PORT`) is ignored and a warning is logged.
+
+## [0.18.7] - 2026-03-03
 
 ### Changed
-- Version bump to 0.17.3 to maintain workspace version synchronization
+- Version bump to 0.18.7 to maintain workspace version synchronization
+
+## [0.18.6] - 2026-02-25
+
+### Changed
+- Version bump to 0.18.6 to maintain workspace version synchronization
+
+## [0.18.5] - 2026-02-22
+
+### Changed
+- Version bump to 0.18.5 to maintain workspace version synchronization
+
+## [0.18.4] - 2026-02-20
+
+### Added
+- **WASM support**: Decoupled HTTP transport from the core plugin, enabling compilation on `wasm32` targets. On native, `RemoteHttpPlugin` is added automatically as before. On WASM, only BRP methods are registered — users supply their own transport (e.g., a WebSocket relay). Thanks [johanhelsing](https://github.com/johanhelsing)!
+- **`get_diagnostics` method**: New BRP method for querying FPS and frame time diagnostics from Bevy's `DiagnosticsStore`. Returns current, average, and smoothed FPS values, frame time in milliseconds, total frame count, and history buffer metadata. Defensively installs `FrameTimeDiagnosticsPlugin` if not already present.
+- **`diagnostics` feature**: New feature flag (enabled by default) that controls FPS diagnostics support. Disable with `default-features = false` to exclude the diagnostics system and `FrameTimeDiagnosticsPlugin`.
+
+### Fixed
+- Fixed BRP-injected mouse input (move, scroll, drag, click) not working when the Bevy app window is unfocused. The `Window` component's internal cursor position is now updated alongside message writes, so `window.cursor_position()` returns the correct value even without OS-level cursor events.
+
+## [0.18.3] - 2026-02-17
+
+### Fixed
+- Fixed simulated mouse and keyboard input not triggering Bevy's picking system by dual-writing events to the `WindowEvent` message channel
+
+## [0.18.2] - 2026-02-17
+
+### Added
+- **Mouse input methods**: Nine new BRP methods for comprehensive mouse control
+  - `click_mouse` - Simple click with configurable button (Left, Right, Middle, Back, Forward)
+  - `double_click_mouse` - Double click with configurable delay between clicks
+  - `send_mouse_button` - Press and hold mouse button for specified duration
+  - `move_mouse` - Move cursor with delta (relative) or absolute positioning
+  - `drag_mouse` - Smooth drag operation with interpolated movement over frames
+  - `scroll_mouse` - Mouse wheel scrolling (line-based or pixel-based, horizontal/vertical)
+  - `double_tap_gesture` - Trackpad double tap gesture (macOS)
+  - `pinch_gesture` - Trackpad pinch-to-zoom gesture (macOS)
+  - `rotation_gesture` - Trackpad rotation gesture (macOS)
+
+### Changed
+- Mouse operations now default to the last window the cursor was moved to instead of always defaulting to the primary window when no explicit `window` parameter is provided
+
+## [0.18.1] - 2026-02-10
+
+### Added
+- **`type_text` method**: New BRP method for sequential character typing. Types text one character per frame, handling shift for uppercase/symbols and mapping unmappable characters as skipped. Thanks [tobert](https://github.com/tobert)!
+
+### Fixed
+- **`send_keys` text field population**: Fixed `send_keys` to populate the `text` field on `KeyboardInput` events, enabling proper text input in Bevy UI text fields. Thanks [tobert](https://github.com/tobert)!
+
+## [0.18.0] - 2026-01-15
+
+### Changed
+- Updated dependency to Bevy 0.18.0 stable release
+
+## [0.18.0-rc.1] - 2025-12-21
+
+### Changed
+- **Upgraded to Bevy 0.18.0-rc.1**: Updated bevy dependency from 0.17.x to 0.18.0-rc.1
+  - `BorderRadius` now set via `Node.border_radius` field instead of standalone component
+  - `AnimationTarget` split into `AnimationTargetId` + `AnimatedBy` components
+  - `Image::reinterpret_stacked_2d_as_array` now returns `Result`
 
 ## [0.17.2] - 2025-11-20
 

@@ -35,33 +35,33 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::super::super::type_kind::TypeKind;
+use super::super::super::variant_signature::VariantSignature;
 use super::super::BuilderError;
 use super::super::NotMutableReason;
 use super::super::mutation_path_internal::MutationPathInternal;
 use super::super::mutation_path_internal::MutationPathSliceExt;
 use super::super::new_types::VariantName;
+use super::super::option_classification::apply_option_transformation;
 use super::super::path_builder;
 use super::super::path_example::PathExample;
 use super::super::path_kind::MutationPathDescriptor;
 use super::super::path_kind::PathKind;
 use super::super::recursion_context::RecursionContext;
 use super::super::support;
-use super::super::types::EnumPathInfo;
-use super::super::types::Example;
-use super::super::types::ExampleGroup;
-use super::super::types::Mutability;
-use super::super::types::MutabilityIssue;
-use super::super::types::PathAction;
-use super::super::types::RootExample;
-use super::option_classification::apply_option_transformation;
+use super::super::types_internal::EnumPathInfo;
+use super::super::types_internal::Example;
+use super::super::types_internal::ExampleGroup;
+use super::super::types_internal::Mutability;
+use super::super::types_internal::MutabilityIssue;
+use super::super::types_internal::PathAction;
+use super::super::types_response::RootExample;
 use super::variant_kind::VariantKind;
-use super::variant_signature::VariantSignature;
 use crate::brp_tools::brp_type_guide::BrpTypeName;
 use crate::brp_tools::brp_type_guide::type_knowledge::KnowledgeAction;
 use crate::error::Error;
 use crate::error::Result;
-use crate::json_object::JsonObjectAccess;
-use crate::json_schema::SchemaField;
+use crate::support::JsonObjectAccess;
+use crate::support::SchemaField;
 
 /// Extension trait for sorting variant groups deterministically
 trait SortedVariantGroups {
@@ -88,7 +88,7 @@ type ProcessChildrenResult = (
 /// This function always generates examples arrays for all enums, anywhere in the type hierarchy
 /// - Ensures all enum fields show their available variants
 /// - Improves discoverability for nested enums
-pub fn process_enum(
+pub(super) fn process_enum(
     ctx: &RecursionContext,
 ) -> std::result::Result<Vec<MutationPathInternal>, BuilderError> {
     tracing::debug!(
@@ -116,21 +116,21 @@ pub fn process_enum(
                 None
             } else {
                 Some(EnumPathInfo {
-                    variant_chain:       ctx.variant_chain.clone(),
+                    variant_chain: ctx.variant_chain.clone(),
                     applicable_variants: Vec::new(),
-                    root_example:        None,
+                    root_example: None,
                 })
             };
 
             return Ok(vec![MutationPathInternal {
-                example:               PathExample::Simple(Example::Json(example)),
-                mutation_path:         ctx.mutation_path.clone(),
-                type_name:             ctx.type_name().display_name(),
-                path_kind:             ctx.path_kind.clone(),
-                mutability:            Mutability::Mutable,
-                mutability_reason:     None,
-                enum_path_info:        enum_path_data,
-                depth:                 *ctx.depth,
+                example: PathExample::Simple(Example::Json(example)),
+                mutation_path: ctx.mutation_path.clone(),
+                type_name: ctx.type_name().display_name(),
+                path_kind: ctx.path_kind.clone(),
+                mutability: Mutability::Mutable,
+                mutability_reason: None,
+                enum_path_info: enum_path_data,
+                depth: *ctx.depth,
                 partial_root_examples: None,
             }]);
         },
@@ -189,7 +189,7 @@ pub fn process_enum(
 /// 1. `Strong`'s example is `None`
 /// 2. This becomes `enum_example_for_parent: None` for `Handle<Image>`
 /// 3. Parent `Option<Handle<Image>>::Some` uses this to build: `{"Some": null}`
-/// 4. Result: Invalid `spawn_format` that crashes when used
+/// 4. Result: Invalid `spawn_example` that crashes when used
 ///
 /// # Selection Strategy
 ///
@@ -203,7 +203,7 @@ pub fn process_enum(
 ///
 /// 3. **Fallback**: Return `None` if no `Mutable` variants exist
 ///    - The entire enum is not spawnable
-pub fn select_preferred_example(examples: &[ExampleGroup]) -> Option<Example> {
+pub(super) fn select_preferred_example(examples: &[ExampleGroup]) -> Option<Example> {
     // First priority: Find a non-unit Mutable variant with a complete example
     // Note: We check mutability explicitly for clarity and safety, even though
     // example.is_some() now implies Mutable due to build_variant_group_example's logic
@@ -344,7 +344,7 @@ fn determine_signature_mutability(
 ///
 /// We omit examples for `NotMutable` and `PartiallyMutable` variants because:
 /// 1. `child_examples` only contains mutable fields (`Arc`/`Handle` fields are excluded)
-/// 2. Building an example with incomplete fields would create invalid `spawn_format` values
+/// 2. Building an example with incomplete fields would create invalid `spawn_example` values
 /// 3. Attempting to spawn with incomplete examples causes Bevy reflection to panic
 /// 4. `select_preferred_example()` will automatically skip variants with `None` examples and choose
 ///    a fully `Mutable` variant (or return `None` if no `Mutable` variants exist)
@@ -519,8 +519,8 @@ fn create_paths_for_signature(
             fields
                 .iter()
                 .map(|(field_name, type_name)| PathKind::StructField {
-                    field_name:  field_name.clone(),
-                    type_name:   type_name.clone(),
+                    field_name: field_name.clone(),
+                    type_name: type_name.clone(),
                     parent_type: ctx.type_name().clone(),
                 })
                 .collect(),
@@ -795,11 +795,7 @@ fn build_enum_mutability_reason(
                 .iter()
                 .flat_map(|eg| {
                     eg.applicable_variants.iter().map(|variant| {
-                        MutabilityIssue::from_variant_name(
-                            variant.clone(),
-                            type_name.clone(),
-                            eg.mutability,
-                        )
+                        MutabilityIssue::from_variant_name(variant.clone(), eg.mutability)
                     })
                 })
                 .collect();
@@ -836,9 +832,9 @@ fn build_enum_root_path(
         None
     } else {
         Some(EnumPathInfo {
-            variant_chain:       ctx.variant_chain.clone(),
+            variant_chain: ctx.variant_chain.clone(),
             applicable_variants: Vec::new(),
-            root_example:        None,
+            root_example: None,
         })
     };
 
@@ -846,7 +842,7 @@ fn build_enum_root_path(
     MutationPathInternal {
         mutation_path: ctx.mutation_path.clone(),
         example: PathExample::EnumRoot {
-            groups:     enum_examples,
+            groups: enum_examples,
             for_parent: default_example,
         },
         type_name: ctx.type_name().display_name(),

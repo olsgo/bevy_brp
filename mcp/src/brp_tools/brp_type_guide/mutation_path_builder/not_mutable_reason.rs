@@ -28,16 +28,16 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::super::brp_type_name::BrpTypeName;
-use super::types::Mutability;
-use super::types::MutabilityIssue;
+use super::types_internal::Mutability;
+use super::types_internal::MutabilityIssue;
 
 /// Represents detailed mutation support status for a type
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NotMutableReason {
+pub(super) enum NotMutableReason {
     /// Container type has non-mutable element type
     NonMutableHandle {
         container_type: BrpTypeName,
-        element_type:   BrpTypeName,
+        element_type: BrpTypeName,
     },
     /// Type not found in registry
     NotInRegistry(BrpTypeName),
@@ -51,28 +51,15 @@ pub enum NotMutableReason {
     NoExampleAvailable(BrpTypeName),
     /// Some children are mutable, others are not (results in `PartiallyMutable`)
     PartialChildMutability {
-        parent_type:       BrpTypeName,
-        message:           String,
-        mutable:           Vec<String>,
-        not_mutable:       Vec<String>,
+        parent_type: BrpTypeName,
+        message: String,
+        mutable: Vec<String>,
+        not_mutable: Vec<String>,
         partially_mutable: Vec<String>,
     },
 }
 
 impl NotMutableReason {
-    /// Extract the deepest failing type from nested error contexts
-    pub fn get_deepest_failing_type(&self) -> BrpTypeName {
-        match self {
-            Self::NotInRegistry(type_name)
-            | Self::RecursionLimitExceeded(type_name)
-            | Self::ComplexCollectionKey(type_name)
-            | Self::NoExampleAvailable(type_name) => type_name.clone(),
-            Self::NonMutableHandle { element_type, .. } => element_type.clone(),
-            Self::NoMutableChildren { parent_type }
-            | Self::PartialChildMutability { parent_type, .. } => parent_type.clone(),
-        }
-    }
-
     /// Construct `PartialChildMutability` from mutability issues
     ///
     /// # Deduplication Logic
@@ -87,7 +74,7 @@ impl NotMutableReason {
     ///
     /// Both create the same path string `.color_lut.0.0`, so this function detects the
     /// conflict and correctly marks it as `partially_mutable`.
-    pub fn from_partial_mutability(
+    pub(super) fn from_partial_mutability(
         parent_type: BrpTypeName,
         mutability_issues: Vec<MutabilityIssue>,
         message: String,

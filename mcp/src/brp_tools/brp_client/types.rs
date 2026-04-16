@@ -30,17 +30,21 @@ pub trait ResultStructBrpExt: Sized {
 /// Error information from BRP operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrpClientError {
-    pub code:    i32,
+    pub code: i32,
     pub message: String,
-    pub data:    Option<Value>,
+    pub data: Option<Value>,
 }
 
 impl BrpClientError {
     /// Get the error code
-    pub const fn get_code(&self) -> i32 { self.code }
+    pub const fn get_code(&self) -> i32 {
+        self.code
+    }
 
     /// Get the error message
-    pub fn get_message(&self) -> &str { &self.message }
+    pub fn get_message(&self) -> &str {
+        &self.message
+    }
 
     /// Check if this error indicates a format issue that can be recovered
     /// This function was constructed through trial and error via vibe coding with claude
@@ -71,20 +75,20 @@ impl std::fmt::Display for BrpClientError {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct BrpClientCallJsonResponse {
     pub jsonrpc: String,
-    pub id:      u64,
+    pub id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result:  Option<Value>,
+    pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error:   Option<JsonRpcError>,
+    pub error: Option<JsonRpcError>,
 }
 
 /// Raw BRP error structure from JSON-RPC response
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct JsonRpcError {
-    pub code:    i32,
+    pub code: i32,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data:    Option<Value>,
+    pub data: Option<Value>,
 }
 
 /// Status of a BRP operation - determines `status` field in the `ToolCallJsonResponse`
@@ -111,7 +115,7 @@ pub enum FormatCorrectionStatus {
 /// Type of BRP operation being performed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Operation {
+pub(super) enum Operation {
     /// Operations that create or replace entire components/resources
     /// Includes: `BevySpawn`, `BevyInsert`, `BevyInsertResource`
     /// Serializes as: `spawn_insert`
@@ -175,7 +179,7 @@ impl TryFrom<BrpMethod> for Operation {
 
 impl Operation {
     /// Extract type names from parameters based on the operation type
-    pub fn extract_type_names(self, params: &Value) -> Vec<String> {
+    pub(super) fn extract_type_names(self, params: &Value) -> Vec<String> {
         match self {
             Self::SpawnInsert { parameter_name } => match parameter_name {
                 ParameterName::Components => {
@@ -441,9 +445,9 @@ mod tests {
     #[test]
     fn test_brp_client_error_display() {
         let error = BrpClientError {
-            code:    -32602,
+            code: -32602,
             message: "Invalid params".to_string(),
-            data:    None,
+            data: None,
         };
         assert_eq!(error.to_string(), "Invalid params");
     }
@@ -451,23 +455,23 @@ mod tests {
     #[test]
     fn test_brp_client_error_is_format_error() {
         let format_error = BrpClientError {
-            code:    JSON_RPC_ERROR_INVALID_PARAMS,
+            code: JSON_RPC_ERROR_INVALID_PARAMS,
             message: "Invalid params".to_string(),
-            data:    None,
+            data: None,
         };
         assert!(format_error.has_format_error_code());
 
         let unknown_component_error = BrpClientError {
-            code:    BRP_ERROR_CODE_UNKNOWN_COMPONENT_TYPE,
+            code: BRP_ERROR_CODE_UNKNOWN_COMPONENT_TYPE,
             message: "Unknown component type".to_string(),
-            data:    None,
+            data: None,
         };
         assert!(unknown_component_error.has_format_error_code());
 
         let non_format_error = BrpClientError {
-            code:    -32601, // Method not found
+            code: -32601, // Method not found
             message: "Method not found".to_string(),
-            data:    None,
+            data: None,
         };
         assert!(!non_format_error.has_format_error_code());
     }

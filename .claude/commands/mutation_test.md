@@ -126,7 +126,7 @@ For each assignment in assignments array, create Task:
 
 ```
 description: assignment.task_description
-subagent_type: "mutation-test-executor"
+subagent_type: "mutation-tester"
 prompt: |
   EXECUTE the mutation test workflow defined in @.claude/instructions/mutation_test_subagent.md
 
@@ -464,7 +464,7 @@ This specific mutation is likely incompatible with the component's implementatio
 </BRPConnectionLost>
 
 <InvestigateFailure>
-1. Run: `.claude/scripts/get_type_guide.sh <failed_type_name> --file .claude/transient/all_types.json`
+1. Run: `.claude/scripts/mutation_test/get_type_guide.sh <failed_type_name> --file .claude/transient/all_types.json`
 2. Examine type guide for failed mutation path
 3. Check `path_info` for `applicable_variants`, `root_example`, `mutability`
 4. Present findings and recommendations

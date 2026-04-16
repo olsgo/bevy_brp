@@ -13,22 +13,23 @@ use std::time::Instant;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 
 /// Resource to track keyboard input history
 #[derive(Resource, Default)]
 struct KeyboardInputHistory {
     /// Currently pressed keys
-    active_keys:      Vec<String>,
+    active_keys: Vec<String>,
     /// Last pressed keys (for display after release)
-    last_keys:        Vec<String>,
+    last_keys: Vec<String>,
     /// Active modifier keys
-    modifiers:        Vec<String>,
+    modifiers: Vec<String>,
     /// Time when the last key was pressed
-    press_time:       Option<Instant>,
+    press_time: Option<Instant>,
     /// Duration between press and release in milliseconds
     last_duration_ms: Option<u64>,
     /// Whether the last key press has completed
-    completed:        bool,
+    completed: bool,
 }
 
 /// Marker component for the keyboard input display text
@@ -36,7 +37,7 @@ struct KeyboardInputHistory {
 struct KeyboardDisplayText;
 
 fn main() {
-    let brp_plugin = BrpExtrasPlugin::new();
+    let brp_plugin = BrpExtrasPlugin::new().port_in_title(PortDisplay::Always);
     let (port, _) = brp_plugin.get_effective_port();
 
     info!("Starting BRP Extras Test on port {}", port);
@@ -53,9 +54,30 @@ fn main() {
         .add_plugins(brp_plugin)
         .init_resource::<KeyboardInputHistory>()
         .insert_resource(CurrentPort(port))
-        .add_systems(Startup, (setup_test_entities, setup_ui))
+        .add_systems(
+            Startup,
+            (setup_test_entities, setup_ui, minimize_window_on_start),
+        )
         .add_systems(Update, (track_keyboard_input, update_keyboard_display))
         .run();
+}
+
+/// Minimize the window immediately on startup (no-op on Linux/Wayland)
+#[cfg(target_os = "linux")]
+fn minimize_window_on_start(
+    windows: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let _ = windows.iter().count();
+}
+
+/// Minimize the window immediately on startup
+#[cfg(not(target_os = "linux"))]
+fn minimize_window_on_start(
+    mut windows: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+) {
+    for mut window in &mut windows {
+        window.set_minimized(true);
+    }
 }
 
 /// Resource to store the current port
@@ -79,8 +101,8 @@ fn setup_test_entities(mut commands: Commands, port: Res<CurrentPort>) {
     commands.spawn((
         Transform {
             translation: Vec3::new(10.0, 20.0, 30.0),
-            rotation:    Quat::from_rotation_y(std::f32::consts::PI / 4.0),
-            scale:       Vec3::new(0.5, 1.5, 2.0),
+            rotation: Quat::from_rotation_y(std::f32::consts::PI / 4.0),
+            scale: Vec3::new(0.5, 1.5, 2.0),
         },
         Name::new("ComplexTransformEntity"),
     ));

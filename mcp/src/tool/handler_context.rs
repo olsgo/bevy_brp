@@ -4,36 +4,37 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use error_stack::ResultExt;
-use rmcp::model::CallToolRequestParam;
+use rmcp::model::CallToolRequestParams;
 use rmcp::model::CallToolResult;
+use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 
+use super::ParamStruct;
+use super::ResultStruct;
+use super::ToolDef;
+use super::ToolResult;
 use super::json_response::AnySchemaValue;
 use super::json_response::ToolCallJsonResponse;
+use super::large_response::CHARS_PER_TOKEN;
+use super::large_response::LargeResponseConfig;
+use super::response_builder::Response;
 use crate::error::Error;
 use crate::error::Result;
-use crate::tool::ParamStruct;
-use crate::tool::ResultStruct;
-use crate::tool::ToolDef;
-use crate::tool::ToolResult;
-use crate::tool::large_response::CHARS_PER_TOKEN;
-use crate::tool::large_response::LargeResponseConfig;
-use crate::tool::response_builder::Response;
 
 /// Context passed to all handlers containing service, request, and MCP context
 #[derive(Clone)]
 pub struct HandlerContext {
     pub(super) tool_def: ToolDef,
-    pub request:         CallToolRequestParam,
-    pub roots:           Vec<PathBuf>,
+    request: CallToolRequestParams,
+    pub roots: Vec<PathBuf>,
 }
 
 impl HandlerContext {
     /// Create a new `HandlerContext`
-    pub(crate) const fn new(
+    pub(super) const fn new(
         tool_def: ToolDef,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         roots: Vec<PathBuf>,
     ) -> Self {
         Self {
@@ -43,14 +44,8 @@ impl HandlerContext {
         }
     }
 
-    /// Get tool definition by looking up the request name in the service's tool registry
-    ///
-    /// # Errors
-    /// Returns an error if the tool definition is not found.
-    pub const fn tool_def(&self) -> &ToolDef { &self.tool_def }
-
     /// Common parameter extraction methods (used by both BRP and local handlers)
-    pub fn extract_parameter_values<T>(&self) -> Result<T>
+    pub(super) fn extract_parameter_values<T>(&self) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -59,14 +54,14 @@ impl HandlerContext {
         let args_value = if std::any::type_name::<T>() == "()" {
             serde_json::Value::Null
         } else {
-            let raw_args = self.request.arguments.as_ref().map_or_else(
-                || serde_json::Value::Object(serde_json::Map::new()),
-                |args| serde_json::Value::Object(args.clone()),
-            );
-            // Coerce string values that look like numbers/booleans to proper JSON types.
-            // This handles MCP clients that serialize numeric values as strings
-            // (e.g., "5" instead of 5), which would otherwise cause deserialization errors.
-            crate::json_object::coerce_string_values(raw_args)
+            self.request.arguments.as_ref().map_or_else(
+                || Value::Object(Map::new()),
+                |args| {
+                    let mut args = args.clone();
+                    parse_stringified_json_values(&mut args);
+                    Value::Object(args)
+                },
+            )
         };
 
         serde_json::from_value(args_value).map_err(|e| {
@@ -91,12 +86,15 @@ impl HandlerContext {
     }
 
     /// Get a field value from the request arguments
-    pub fn extract_optional_named_field(&self, field_name: &str) -> Option<&Value> {
+    ///
+    /// Note: Arguments are preprocessed by `parse_stringified_json_values` to handle
+    /// MCP clients that stringify JSON objects/arrays for `Any`-typed parameters.
+    pub(super) fn extract_optional_named_field(&self, field_name: &str) -> Option<&Value> {
         self.request.arguments.as_ref()?.get(field_name)
     }
 
     /// Format a tool result into a `CallToolResult`
-    pub fn format_result<T, P>(&self, tool_result: ToolResult<T, P>) -> CallToolResult
+    pub(super) fn format_result<T, P>(&self, tool_result: ToolResult<T, P>) -> CallToolResult
     where
         T: ResultStruct,
         P: ParamStruct,
@@ -160,7 +158,10 @@ impl HandlerContext {
     }
 
     /// Format framework errors
-    pub fn format_framework_error(&self, error: error_stack::Report<Error>) -> CallToolResult {
+    pub(super) fn format_framework_error(
+        &self,
+        error: error_stack::Report<Error>,
+    ) -> CallToolResult {
         let tool_name = self.tool_def.tool_name;
         let call_info = tool_name.get_call_info();
 
@@ -221,5 +222,27 @@ impl HandlerContext {
         }
 
         Ok(response)
+    }
+}
+
+/// Pre-process MCP arguments to parse JSON-encoded strings back into native JSON values.
+///
+/// MCP clients may stringify JSON objects/arrays when a parameter schema uses
+/// `ParameterType::Any` (e.g., `serde_json::Value` fields). This function detects
+/// string values that contain valid JSON objects or arrays and replaces them with
+/// the parsed structure so serde deserialization produces the correct types.
+fn parse_stringified_json_values(args: &mut Map<String, Value>) {
+    for value in args.values_mut() {
+        if let Value::String(s) = value {
+            let trimmed = s.trim();
+            let looks_like_json_object = trimmed.starts_with('{') && trimmed.ends_with('}');
+            let looks_like_json_array = trimmed.starts_with('[') && trimmed.ends_with(']');
+
+            if (looks_like_json_object || looks_like_json_array)
+                && let Ok(parsed) = serde_json::from_str::<Value>(trimmed)
+            {
+                *value = parsed;
+            }
+        }
     }
 }

@@ -1,11 +1,11 @@
 //! Window title handler for BRP extras
 
 use bevy::prelude::*;
-use bevy::remote::BrpError;
-use bevy::remote::BrpResult;
-use bevy::remote::error_codes::INTERNAL_ERROR;
-use bevy::remote::error_codes::INVALID_PARAMS;
 use bevy::window::PrimaryWindow;
+use bevy_remote::BrpError;
+use bevy_remote::BrpResult;
+use bevy_remote::error_codes::INTERNAL_ERROR;
+use bevy_remote::error_codes::INVALID_PARAMS;
 use serde_json::Value;
 use serde_json::json;
 
@@ -17,9 +17,9 @@ pub fn handler(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
         .and_then(|p| p.get("title"))
         .and_then(|t| t.as_str())
         .ok_or_else(|| BrpError {
-            code:    INVALID_PARAMS,
+            code: INVALID_PARAMS,
             message: "Missing or invalid 'title' parameter".to_string(),
-            data:    None,
+            data: None,
         })?;
 
     // Query for primary window
@@ -27,9 +27,9 @@ pub fn handler(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
 
     // Get mutable window reference
     let mut window = query.single_mut(world).map_err(|_| BrpError {
-        code:    INTERNAL_ERROR,
+        code: INTERNAL_ERROR,
         message: "No primary window found".to_string(),
-        data:    None,
+        data: None,
     })?;
 
     // Store old title for response

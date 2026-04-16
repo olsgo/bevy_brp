@@ -37,34 +37,34 @@ use super::path_kind::MutationPathDescriptor;
 use super::path_kind::PathKind;
 use super::recursion_context::RecursionContext;
 use super::support;
-use super::type_kind_builders::ArrayMutationBuilder;
-use super::type_kind_builders::ListMutationBuilder;
-use super::type_kind_builders::MapMutationBuilder;
-use super::type_kind_builders::SetMutationBuilder;
-use super::type_kind_builders::StructMutationBuilder;
-use super::type_kind_builders::TupleMutationBuilder;
-use super::type_kind_builders::TypeKindBuilder;
-use super::type_kind_builders::ValueMutationBuilder;
-use super::types::EnumPathInfo;
-use super::types::Example;
-use super::types::Mutability;
-use super::types::MutabilityIssue;
-use super::types::PathAction;
-use super::types::RootExample;
+use super::type_kind_builder::ArrayMutationBuilder;
+use super::type_kind_builder::ListMutationBuilder;
+use super::type_kind_builder::MapMutationBuilder;
+use super::type_kind_builder::SetMutationBuilder;
+use super::type_kind_builder::StructMutationBuilder;
+use super::type_kind_builder::TupleMutationBuilder;
+use super::type_kind_builder::TypeKindBuilder;
+use super::type_kind_builder::ValueMutationBuilder;
+use super::types_internal::EnumPathInfo;
+use super::types_internal::Example;
+use super::types_internal::Mutability;
+use super::types_internal::MutabilityIssue;
+use super::types_internal::PathAction;
+use super::types_response::RootExample;
 use crate::error::Error;
 use crate::error::Result;
 
 /// Result of processing all children during mutation path building
 struct ChildProcessingResult {
     /// All child paths (used for mutation status determination)
-    all_paths:       Vec<MutationPathInternal>,
+    all_paths: Vec<MutationPathInternal>,
     /// Only paths that should be exposed (filtered by `PathAction`)
     paths_to_expose: Vec<MutationPathInternal>,
     /// Examples for each child path
-    child_examples:  HashMap<MutationPathDescriptor, Example>,
+    child_examples: HashMap<MutationPathDescriptor, Example>,
 }
 
-pub struct MutationPathBuilder<B: TypeKindBuilder> {
+pub(super) struct MutationPathBuilder<B: TypeKindBuilder> {
     inner: B,
 }
 
@@ -202,7 +202,7 @@ impl<B: TypeKindBuilder<Item = PathKind>> TypeKindBuilder for MutationPathBuilde
 /// Depth limit checking is automatic in `RecursionContext::create_recursion_context()`.
 /// The check happens at the point where depth is incremented, ensuring developers cannot
 /// accidentally skip the check.
-pub fn recurse_mutation_paths(
+pub(super) fn recurse_mutation_paths(
     type_kind: TypeKind,
     ctx: &RecursionContext,
 ) -> Result<Vec<MutationPathInternal>> {
@@ -246,7 +246,7 @@ pub fn recurse_mutation_paths(
 ///
 /// Unlike Structs where some fields can be mutable and others not, collections are
 /// all-or-nothing: either you can perform operations or you can't.
-pub fn determine_parent_mutability(
+pub(super) fn determine_parent_mutability(
     ctx: &RecursionContext,
     child_paths: &[MutationPathInternal],
 ) -> (Mutability, Option<NotMutableReason>) {
@@ -321,7 +321,9 @@ pub fn determine_parent_mutability(
 }
 
 impl<B: TypeKindBuilder<Item = PathKind>> MutationPathBuilder<B> {
-    pub const fn new(inner: B) -> Self { Self { inner } }
+    pub(super) const fn new(inner: B) -> Self {
+        Self { inner }
+    }
 
     /// Process all children and collect their paths and examples
     fn process_all_children(
@@ -432,9 +434,9 @@ impl<B: TypeKindBuilder<Item = PathKind>> MutationPathBuilder<B> {
             None
         } else {
             Some(EnumPathInfo {
-                variant_chain:       ctx.variant_chain.clone(),
+                variant_chain: ctx.variant_chain.clone(),
                 applicable_variants: Vec::new(),
-                root_example:        None,
+                root_example: None,
             })
         };
 

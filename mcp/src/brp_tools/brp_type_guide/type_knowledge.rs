@@ -63,13 +63,13 @@ use super::constants::TYPE_U32;
 use super::constants::TYPE_U64;
 use super::constants::TYPE_U128;
 use super::constants::TYPE_USIZE;
-use super::mutation_path_builder::VariantSignature;
+use super::variant_signature::VariantSignature;
 use crate::brp_tools::BrpTypeName;
 use crate::error::Error;
 
 /// Format knowledge key for matching types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum KnowledgeKey {
+pub(super) enum KnowledgeKey {
     /// Exact type name match (current behavior)
     Exact(BrpTypeName),
     /// Struct field-specific match for providing appropriate field values
@@ -77,33 +77,35 @@ pub enum KnowledgeKey {
         /// e.g., `bevy_window::window::WindowResolution`
         struct_type: BrpTypeName,
         /// e.g., `physical_width`
-        field_name:  String,
+        field_name: String,
     },
     /// Match an indexed element within enum variants that share a signature
     EnumVariantSignature {
         enum_type: BrpTypeName,
         signature: VariantSignature,
-        index:     usize,
+        index: usize,
     },
 }
 
 impl KnowledgeKey {
     /// Create an exact match key
-    pub fn exact(s: impl Into<BrpTypeName>) -> Self { Self::Exact(s.into()) }
+    pub(super) fn exact(s: impl Into<BrpTypeName>) -> Self {
+        Self::Exact(s.into())
+    }
 
     /// Create a struct field match key
-    pub fn struct_field(
+    pub(super) fn struct_field(
         struct_type: impl Into<BrpTypeName>,
         field_name: impl Into<String>,
     ) -> Self {
         Self::StructField {
             struct_type: struct_type.into(),
-            field_name:  field_name.into(),
+            field_name: field_name.into(),
         }
     }
 
     /// Create an enum variant signature match key
-    pub fn enum_variant_signature(
+    pub(super) fn enum_variant_signature(
         enum_type: impl Into<BrpTypeName>,
         signature: VariantSignature,
         index: usize,
@@ -118,12 +120,12 @@ impl KnowledgeKey {
 
 /// Hardcoded BRP format knowledge for a type
 #[derive(Debug, Clone)]
-pub enum TypeKnowledge {
+pub(super) enum TypeKnowledge {
     /// Simple value with just an example
     TeachAndRecurse { example: Value },
     /// Value that should be treated as opaque (no mutation paths)
     TreatAsRootValue {
-        example:         Value,
+        example: Value,
         simplified_type: String,
     },
 }
@@ -134,7 +136,7 @@ pub enum TypeKnowledge {
 /// after consulting the knowledge base, distinct from `TypeKnowledge` which
 /// represents the **static facts** stored in the knowledge base.
 #[derive(Debug, Clone)]
-pub enum KnowledgeAction {
+pub(super) enum KnowledgeAction {
     /// Use this example as the root value - DO NOT recurse into children
     ///
     /// Returned for `TreatAsRootValue` knowledge where the type should be treated
@@ -154,10 +156,12 @@ pub enum KnowledgeAction {
 
 impl TypeKnowledge {
     /// Create a simple knowledge entry with no subfields
-    pub const fn new(example: Value) -> Self { Self::TeachAndRecurse { example } }
+    pub(super) const fn new(example: Value) -> Self {
+        Self::TeachAndRecurse { example }
+    }
 
     /// Create a knowledge entry that should be treated as a simple value
-    pub fn as_root_value(example: Value, simplified_type: impl Into<String>) -> Self {
+    pub(super) fn as_root_value(example: Value, simplified_type: impl Into<String>) -> Self {
         Self::TreatAsRootValue {
             example,
             simplified_type: simplified_type.into(),
@@ -165,14 +169,14 @@ impl TypeKnowledge {
     }
 
     /// Get the example value for this knowledge
-    pub const fn example(&self) -> &Value {
+    pub(super) const fn example(&self) -> &Value {
         match self {
             Self::TeachAndRecurse { example } | Self::TreatAsRootValue { example, .. } => example,
         }
     }
 
     /// Get simplified name for a type if it has `TreatAsRootValue` knowledge
-    pub fn get_simplified_name(type_name: &BrpTypeName) -> Option<BrpTypeName> {
+    pub(super) fn get_simplified_name(type_name: &BrpTypeName) -> Option<BrpTypeName> {
         let knowledge_key = KnowledgeKey::exact(type_name);
         if let Some(Self::TreatAsRootValue {
             simplified_type, ..
@@ -188,7 +192,7 @@ impl TypeKnowledge {
     ///
     /// This is used for generating agent guidance messages that reference Entity IDs.
     /// Returns an error if the Entity type knowledge is missing or invalid.
-    pub fn get_entity_example_value() -> crate::error::Result<u64> {
+    pub(super) fn get_entity_example_value() -> crate::error::Result<u64> {
         BRP_TYPE_KNOWLEDGE
             .get(&KnowledgeKey::exact(TYPE_BEVY_ENTITY))
             .and_then(|knowledge| knowledge.example().as_u64())
@@ -203,7 +207,7 @@ impl TypeKnowledge {
 
 /// Static map of hardcoded BRP format knowledge
 /// This captures the serialization rules that can't be derived from registry
-pub static BRP_TYPE_KNOWLEDGE: LazyLock<HashMap<KnowledgeKey, TypeKnowledge>> =
+pub(super) static BRP_TYPE_KNOWLEDGE: LazyLock<HashMap<KnowledgeKey, TypeKnowledge>> =
     LazyLock::new(|| {
         let mut map = HashMap::new();
 
@@ -676,6 +680,25 @@ pub static BRP_TYPE_KNOWLEDGE: LazyLock<HashMap<KnowledgeKey, TypeKnowledge>> =
                 json!({"secs": 0, "nanos": 250_000_000}),
                 TYPE_CORE_DURATION,
             ),
+        );
+
+        // ===== Time<Real> field-specific values =====
+        // wrap_period must be non-zero to prevent divide-by-zero in time wrapping calculations
+        // Default is 3600 seconds (1 hour) - setting to zero causes app crash
+        map.insert(
+            KnowledgeKey::struct_field(
+                "bevy_time::time::Time<bevy_time::real::Real>",
+                "wrap_period",
+            ),
+            TypeKnowledge::as_root_value(json!({"secs": 3600, "nanos": 0}), TYPE_CORE_DURATION),
+        );
+
+        // ===== Time<()> field-specific values =====
+        // wrap_period must be non-zero to prevent divide-by-zero in time wrapping calculations
+        // Default is 3600 seconds (1 hour) - setting to zero causes app crash
+        map.insert(
+            KnowledgeKey::struct_field("bevy_time::time::Time<()>", "wrap_period"),
+            TypeKnowledge::as_root_value(json!({"secs": 3600, "nanos": 0}), TYPE_CORE_DURATION),
         );
 
         // ===== AlphaMode2d enum variant signatures =====

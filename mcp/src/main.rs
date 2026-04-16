@@ -8,7 +8,6 @@
 
 use std::error::Error;
 
-use brp_tools::WatchManager;
 use log_tools::TracingLevel;
 use mcp_service::McpService;
 use rmcp::ServiceExt;
@@ -17,10 +16,9 @@ use rmcp::transport::stdio;
 mod app_tools;
 mod brp_tools;
 mod error;
-mod json_object;
-mod json_schema;
 mod log_tools;
 mod mcp_service;
+mod support;
 mod tool;
 
 #[tokio::main]
@@ -28,9 +26,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Initialize file-based tracing with dynamic level management
     // Uses lazy file creation - file only created on first log write
     TracingLevel::init_file_tracing();
-
-    // Initialize the watch manager
-    WatchManager::initialize_watch_manager().await;
 
     let service = McpService::new();
 
